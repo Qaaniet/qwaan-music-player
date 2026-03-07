@@ -2,19 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
   build-and-check:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -23,7 +23,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Linux dependencies
+      - name: Install Linux dependencies for Tauri
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -37,14 +37,14 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         run: npm ci
 
-      - name: Frontend build
+      - name: Build frontend
         run: npm run build
 
-      - name: Rust check
+      - name: Check Rust code
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
-      - name: Rust test
+      - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
