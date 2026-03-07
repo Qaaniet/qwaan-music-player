@@ -1,7 +1,28 @@
-# Tauri + React + Typescript
+# Qwaan Music Player
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Qwaan Music Player is a custom desktop music player built using Tauri, Rust, and a modern frontend stack.
 
-## Recommended IDE Setup
+The goal of the project is to create a fast, lightweight, and fully customizable music player with better library management than typical desktop players.
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Features (Planned / In Progress)
+
+- Fast music library scanning
+- Metadata reading and tagging
+- Album and artist browsing
+- Queue and playlist system
+- Beautiful customizable UI
+- Cross-platform support
+
+## Tech Stack
+
+- Tauri
+- Rust
+- JavaScript / TypeScript frontend
+- Node.js tooling
+
+## Development
+
+Install dependencies:
+
+```bash
+npm install
