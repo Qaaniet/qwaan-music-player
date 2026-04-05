@@ -9,6 +9,7 @@ type GenreDetailsViewProps = {
   currentAlbumKey: string;
   onBack: () => void;
   onOpenAlbum: (album: AlbumSummary) => void;
+  onOpenArtist: (artist: string) => void;
   onPlayTrack: (track: TrackRow, queue?: TrackRow[]) => void;
 };
 
@@ -18,6 +19,7 @@ export function GenreDetailsView({
   currentAlbumKey,
   onBack,
   onOpenAlbum,
+  onOpenArtist,
   onPlayTrack,
 }: GenreDetailsViewProps) {
   return (
@@ -68,6 +70,7 @@ export function GenreDetailsView({
             sections={[["", genre.albums]]}
             currentAlbumKey={currentAlbumKey}
             onOpenAlbum={onOpenAlbum}
+            onOpenArtist={onOpenArtist}
             onPlayAlbum={(track, queue) => onPlayTrack(track, queue)}
           />
         </section>

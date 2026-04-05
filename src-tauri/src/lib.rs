@@ -1,19 +1,21 @@
+use image::GenericImageView;
 use lofty::config::{ParseOptions, WriteOptions};
 use lofty::file::{AudioFile, BoundTaggedFile, TaggedFileExt};
+use lofty::picture::{Picture, PictureType};
 use lofty::prelude::Accessor;
 use lofty::probe::Probe;
-use lofty::picture::{Picture, PictureType};
 use lofty::tag::ItemKey;
+use rayon::prelude::*;
 use reqwest::blocking::Client;
-use rodio::Decoder;
 use rodio::stream::MixerDeviceSink;
+use rodio::Decoder;
 use rodio::{DeviceSinkBuilder, Player, Source};
 use rusqlite::{params, Connection, OptionalExtension};
-use std::collections::{BTreeMap, HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, Cursor};
 use std::hash::{Hash, Hasher};
+use std::io::{BufReader, Cursor};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::thread;
@@ -107,8 +109,13 @@ struct ArtistImagePayload {
 #[derive(serde::Serialize)]
 struct AlbumArtCandidate {
     image_url: String,
+    preview_url: String,
     label: String,
     source: String,
+    width: u32,
+    height: u32,
+    file_size_bytes: usize,
+    score: f64,
 }
 
 #[derive(serde::Deserialize)]
@@ -323,8 +330,86 @@ struct AudioDbAlbum {
     album_thumb: Option<String>,
     #[serde(rename = "strAlbumThumbHQ")]
     album_thumb_hq: Option<String>,
-    #[serde(rename = "strAlbumCDart")]
-    album_cdart: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ItunesSearchResponse {
+    results: Vec<ItunesAlbum>,
+}
+
+#[derive(serde::Deserialize)]
+struct ItunesAlbum {
+    #[serde(rename = "artistName")]
+    artist_name: Option<String>,
+    #[serde(rename = "collectionName")]
+    collection_name: Option<String>,
+    #[serde(rename = "artworkUrl100")]
+    artwork_url_100: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct DeezerSearchResponse {
+    data: Vec<DeezerAlbum>,
+}
+
+#[derive(serde::Deserialize)]
+struct DeezerAlbum {
+    title: Option<String>,
+    cover: Option<String>,
+    #[serde(rename = "cover_medium")]
+    cover_medium: Option<String>,
+    #[serde(rename = "cover_big")]
+    cover_big: Option<String>,
+    #[serde(rename = "cover_xl")]
+    cover_xl: Option<String>,
+    artist: DeezerArtist,
+}
+
+#[derive(serde::Deserialize)]
+struct DeezerArtist {
+    name: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct MusicBrainzReleaseSearchResponse {
+    releases: Vec<MusicBrainzRelease>,
+}
+
+#[derive(serde::Deserialize)]
+struct MusicBrainzRelease {
+    id: String,
+    title: Option<String>,
+    score: Option<i32>,
+    #[serde(rename = "artist-credit", default)]
+    artist_credit: Vec<MusicBrainzArtistCredit>,
+}
+
+#[derive(serde::Deserialize)]
+struct MusicBrainzArtistCredit {
+    name: Option<String>,
+}
+
+#[derive(Clone)]
+struct AlbumArtCandidateSeed {
+    image_url: String,
+    preview_url: String,
+    label: String,
+    source: String,
+    source_priority: f64,
+    relevance_hint: f64,
+}
+
+#[derive(Clone)]
+struct AlbumArtCandidateMetadata {
+    image_url: String,
+    preview_url: String,
+    label: String,
+    source: String,
+    source_priority: f64,
+    width: u32,
+    height: u32,
+    file_size_bytes: usize,
+    relevance_hint: f64,
 }
 
 impl Default for PlaybackEngine {
@@ -364,7 +449,11 @@ impl Default for PersistedPlaybackSession {
 impl PlaybackEngine {
     fn ended(&self) -> bool {
         !self.current_path.is_empty()
-            && self.player.as_ref().map(|player| player.empty()).unwrap_or(false)
+            && self
+                .player
+                .as_ref()
+                .map(|player| player.empty())
+                .unwrap_or(false)
     }
 
     fn to_payload(&self) -> PlaybackStatePayload {
@@ -463,7 +552,13 @@ fn ensure_artist_image_table(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-fn save_artwork(path: &Path, album_artist: &str, album: &str, artwork_dir: &Path, data: &[u8]) -> Option<String> {
+fn save_artwork(
+    path: &Path,
+    album_artist: &str,
+    album: &str,
+    artwork_dir: &Path,
+    data: &[u8],
+) -> Option<String> {
     if data.is_empty() {
         return None;
     }
@@ -489,7 +584,12 @@ fn get_artist_images_dir() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn save_artist_image(artist_name: &str, artist_key: &str, artist_images_dir: &Path, data: &[u8]) -> Option<String> {
+fn save_artist_image(
+    artist_name: &str,
+    artist_key: &str,
+    artist_images_dir: &Path,
+    data: &[u8],
+) -> Option<String> {
     if data.is_empty() {
         return None;
     }
@@ -517,15 +617,18 @@ fn pick_artist_image_url(artist_name: &str, client: &Client) -> Option<String> {
     let payload: AudioDbSearchResponse = response.json().ok()?;
     let normalized = normalize_artist_key(artist_name);
 
-    let best_match = payload
-        .artists?
-        .into_iter()
-        .find(|artist| normalize_artist_key(artist.artist_name.as_deref().unwrap_or("")) == normalized)?;
+    let best_match = payload.artists?.into_iter().find(|artist| {
+        normalize_artist_key(artist.artist_name.as_deref().unwrap_or("")) == normalized
+    })?;
 
     best_match
         .artist_thumb
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| best_match.artist_fanart.filter(|value| !value.trim().is_empty()))
+        .or_else(|| {
+            best_match
+                .artist_fanart
+                .filter(|value| !value.trim().is_empty())
+        })
 }
 
 fn fetch_artist_image_bytes(artist_name: &str, client: &Client) -> Option<(String, Vec<u8>)> {
@@ -625,12 +728,25 @@ fn fetch_missing_artist_images(app: tauri::AppHandle) -> Result<(), String> {
                         },
                     );
                 } else {
-                    let _ =
-                        set_artist_image_status(&conn, &artist_name, &artist_key, None, Some(&source_url), "missing");
+                    let _ = set_artist_image_status(
+                        &conn,
+                        &artist_name,
+                        &artist_key,
+                        None,
+                        Some(&source_url),
+                        "missing",
+                    );
                 }
             }
             None => {
-                let _ = set_artist_image_status(&conn, &artist_name, &artist_key, None, None, "missing");
+                let _ = set_artist_image_status(
+                    &conn,
+                    &artist_name,
+                    &artist_key,
+                    None,
+                    None,
+                    "missing",
+                );
             }
         }
 
@@ -665,30 +781,264 @@ fn upsert_track(conn: &Connection, track: TrackRow) -> Result<(), String> {
     Ok(())
 }
 
-fn search_album_art_candidates(artist_name: &str, album_name: &str) -> Result<Vec<AlbumArtCandidate>, String> {
-    let client = Client::builder()
-        .user_agent("qwaan-music-player/0.1.0")
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())?;
+fn normalize_search_text(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|char| {
+            if char.is_alphanumeric() || char.is_whitespace() {
+                char
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
+fn build_album_art_queries(artist_name: &str, album_name: &str) -> Vec<String> {
+    let artist = artist_name.trim();
+    let album = album_name.trim();
+
+    let mut queries = vec![
+        format!("{artist} {album} album cover"),
+        format!("{artist} {album} official album cover"),
+        format!("{artist} {album} album artwork"),
+        format!("\"{artist}\" \"{album}\""),
+        format!("{artist} {album}"),
+    ];
+
+    queries.retain(|query| !query.trim().is_empty());
+    queries.dedup();
+    queries
+}
+
+fn tokenize(value: &str) -> Vec<String> {
+    normalize_search_text(value)
+        .split_whitespace()
+        .map(|item| item.to_string())
+        .collect()
+}
+
+fn text_similarity(expected: &str, candidate: &str) -> f64 {
+    let expected_tokens = tokenize(expected);
+    if expected_tokens.is_empty() {
+        return 0.0;
+    }
+
+    let candidate_tokens: HashSet<String> = tokenize(candidate).into_iter().collect();
+    let matched = expected_tokens
+        .iter()
+        .filter(|token| candidate_tokens.contains(token.as_str()))
+        .count();
+
+    matched as f64 / expected_tokens.len() as f64
+}
+
+fn combined_relevance_score(
+    expected_artist: &str,
+    expected_album: &str,
+    candidate_artist: &str,
+    candidate_album: &str,
+) -> f64 {
+    let artist_score = text_similarity(expected_artist, candidate_artist);
+    let album_score = text_similarity(expected_album, candidate_album);
+    (artist_score * 0.45) + (album_score * 0.55)
+}
+
+fn push_candidate_seed(
+    seeds: &mut Vec<AlbumArtCandidateSeed>,
+    seen_urls: &mut HashSet<String>,
+    seed: AlbumArtCandidateSeed,
+) {
+    let dedupe_key = format!(
+        "{}|{}",
+        normalize_search_text(&seed.image_url),
+        normalize_search_text(&seed.preview_url)
+    );
+
+    if seen_urls.insert(dedupe_key) {
+        seeds.push(seed);
+    }
+}
+
+fn upgrade_itunes_artwork_url(url: &str, size: u32) -> String {
+    let mut upgraded = url.to_string();
+
+    for token in ["100x100bb", "60x60bb"] {
+        if upgraded.contains(token) {
+            upgraded = upgraded.replace(token, &format!("{size}x{size}bb"));
+        }
+    }
+
+    upgraded
+}
+
+fn fetch_itunes_album_art_candidates(
+    client: &Client,
+    artist_name: &str,
+    album_name: &str,
+    queries: &[String],
+) -> Vec<AlbumArtCandidateSeed> {
+    let mut seeds = Vec::new();
+    let mut seen_urls = HashSet::new();
+
+    for query in queries.iter().take(3) {
+        let encoded = urlencoding::encode(query);
+        let url = format!(
+            "https://itunes.apple.com/search?term={encoded}&entity=album&media=music&limit=35"
+        );
+
+        let payload = match client
+            .get(url)
+            .send()
+            .and_then(|response| response.error_for_status())
+            .and_then(|response| response.json::<ItunesSearchResponse>())
+        {
+            Ok(payload) => payload,
+            Err(_) => continue,
+        };
+
+        for album in payload.results {
+            let candidate_artist = album.artist_name.unwrap_or_default();
+            let candidate_album = album.collection_name.unwrap_or_default();
+            let Some(base_artwork_url) = album
+                .artwork_url_100
+                .filter(|value| !value.trim().is_empty())
+            else {
+                continue;
+            };
+
+            let relevance = combined_relevance_score(
+                artist_name,
+                album_name,
+                &candidate_artist,
+                &candidate_album,
+            );
+
+            if relevance < 0.5 {
+                continue;
+            }
+
+            push_candidate_seed(
+                &mut seeds,
+                &mut seen_urls,
+                AlbumArtCandidateSeed {
+                    image_url: upgrade_itunes_artwork_url(&base_artwork_url, 1200),
+                    preview_url: upgrade_itunes_artwork_url(&base_artwork_url, 600),
+                    label: format!("{candidate_artist} • {candidate_album}"),
+                    source: "iTunes".to_string(),
+                    source_priority: 0.94,
+                    relevance_hint: relevance,
+                },
+            );
+        }
+    }
+
+    seeds
+}
+
+fn fetch_deezer_album_art_candidates(
+    client: &Client,
+    artist_name: &str,
+    album_name: &str,
+) -> Vec<AlbumArtCandidateSeed> {
+    let mut seeds = Vec::new();
+    let mut seen_urls = HashSet::new();
+    let queries = [
+        format!("artist:\"{artist_name}\" album:\"{album_name}\""),
+        format!("{artist_name} {album_name}"),
+    ];
+
+    for query in queries {
+        let encoded = urlencoding::encode(&query);
+        let url = format!("https://api.deezer.com/search/album?q={encoded}&limit=40");
+        let payload = match client
+            .get(url)
+            .send()
+            .and_then(|response| response.error_for_status())
+            .and_then(|response| response.json::<DeezerSearchResponse>())
+        {
+            Ok(payload) => payload,
+            Err(_) => continue,
+        };
+
+        for album in payload.data {
+            let candidate_artist = album.artist.name.unwrap_or_default();
+            let candidate_album = album.title.unwrap_or_default();
+            let image_url = album
+                .cover_xl
+                .or(album.cover_big.clone())
+                .or(album.cover_medium.clone())
+                .or(album.cover.clone());
+
+            let Some(image_url) = image_url.filter(|value| !value.trim().is_empty()) else {
+                continue;
+            };
+
+            let preview_url = album
+                .cover_big
+                .clone()
+                .or(album.cover_medium.clone())
+                .unwrap_or_else(|| image_url.clone());
+
+            let relevance = combined_relevance_score(
+                artist_name,
+                album_name,
+                &candidate_artist,
+                &candidate_album,
+            );
+
+            if relevance < 0.5 {
+                continue;
+            }
+
+            push_candidate_seed(
+                &mut seeds,
+                &mut seen_urls,
+                AlbumArtCandidateSeed {
+                    image_url,
+                    preview_url,
+                    label: format!("{candidate_artist} • {candidate_album}"),
+                    source: "Deezer".to_string(),
+                    source_priority: 0.91,
+                    relevance_hint: relevance,
+                },
+            );
+        }
+    }
+
+    seeds
+}
+
+fn fetch_audiodb_album_art_candidates(
+    client: &Client,
+    artist_name: &str,
+    album_name: &str,
+) -> Vec<AlbumArtCandidateSeed> {
     let artist_encoded = urlencoding::encode(artist_name);
     let album_encoded = urlencoding::encode(album_name);
-
     let exact_url = format!(
-        "https://www.theaudiodb.com/api/v1/json/123/searchalbum.php?s={}&a={}",
-        artist_encoded, album_encoded
+        "https://www.theaudiodb.com/api/v1/json/123/searchalbum.php?s={artist_encoded}&a={album_encoded}"
     );
-    let artist_url = format!(
-        "https://www.theaudiodb.com/api/v1/json/123/searchalbum.php?s={}",
-        artist_encoded
-    );
-
-    let mut candidates = Vec::new();
+    let artist_url =
+        format!("https://www.theaudiodb.com/api/v1/json/123/searchalbum.php?s={artist_encoded}");
+    let mut seeds = Vec::new();
+    let mut seen_urls = HashSet::new();
 
     for (request_url, exact_match_only) in [(exact_url, true), (artist_url, false)] {
-        let response = client.get(&request_url).send().map_err(|e| e.to_string())?;
-        let payload: AudioDbAlbumSearchResponse = response.json().map_err(|e| e.to_string())?;
+        let payload = match client
+            .get(request_url)
+            .send()
+            .and_then(|response| response.error_for_status())
+            .and_then(|response| response.json::<AudioDbAlbumSearchResponse>())
+        {
+            Ok(payload) => payload,
+            Err(_) => continue,
+        };
 
         for album in payload.album.unwrap_or_default() {
             let candidate_album_name = album.album_name.unwrap_or_default();
@@ -701,28 +1051,289 @@ fn search_album_art_candidates(artist_name: &str, album_name: &str) -> Result<Ve
             }
 
             if !exact_match_only
-                && !normalize_artist_key(&candidate_album_name).contains(&normalize_artist_key(album_name))
+                && !normalize_artist_key(&candidate_album_name)
+                    .contains(&normalize_artist_key(album_name))
             {
                 continue;
             }
 
-            for image_url in [album.album_thumb_hq, album.album_thumb, album.album_cdart] {
-                if let Some(image_url) = image_url.filter(|value| !value.trim().is_empty()) {
-                    if candidates.iter().any(|candidate: &AlbumArtCandidate| candidate.image_url == image_url) {
-                        continue;
-                    }
+            let relevance = combined_relevance_score(
+                artist_name,
+                album_name,
+                &candidate_artist_name,
+                &candidate_album_name,
+            );
 
-                    candidates.push(AlbumArtCandidate {
-                        image_url: image_url.clone(),
-                        label: format!("{} • {}", candidate_artist_name, candidate_album_name),
+            if relevance < 0.55 {
+                continue;
+            }
+
+            for image_url in [album.album_thumb_hq, album.album_thumb] {
+                let Some(image_url) = image_url.filter(|value| !value.trim().is_empty()) else {
+                    continue;
+                };
+
+                push_candidate_seed(
+                    &mut seeds,
+                    &mut seen_urls,
+                    AlbumArtCandidateSeed {
+                        preview_url: image_url.clone(),
+                        image_url,
+                        label: format!("{candidate_artist_name} • {candidate_album_name}"),
                         source: "TheAudioDB".to_string(),
-                    });
-                }
+                        source_priority: 0.78,
+                        relevance_hint: relevance,
+                    },
+                );
             }
         }
     }
 
-    Ok(candidates)
+    seeds
+}
+
+fn fetch_musicbrainz_album_art_candidates(
+    client: &Client,
+    artist_name: &str,
+    album_name: &str,
+) -> Vec<AlbumArtCandidateSeed> {
+    let exact_query = format!("release:\"{album_name}\" AND artist:\"{artist_name}\"");
+    let broad_query = format!("{artist_name} {album_name}");
+    let mut seeds = Vec::new();
+    let mut seen_urls = HashSet::new();
+
+    for query in [exact_query, broad_query] {
+        let encoded = urlencoding::encode(&query);
+        let url =
+            format!("https://musicbrainz.org/ws/2/release/?query={encoded}&fmt=json&limit=30");
+
+        let payload = match client
+            .get(url)
+            .header("Accept", "application/json")
+            .send()
+            .and_then(|response| response.error_for_status())
+            .and_then(|response| response.json::<MusicBrainzReleaseSearchResponse>())
+        {
+            Ok(payload) => payload,
+            Err(_) => continue,
+        };
+
+        for release in payload.releases {
+            let candidate_album = release.title.unwrap_or_default();
+            let candidate_artist = release
+                .artist_credit
+                .iter()
+                .filter_map(|credit| credit.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let relevance = combined_relevance_score(
+                artist_name,
+                album_name,
+                &candidate_artist,
+                &candidate_album,
+            );
+            let score_boost = (release.score.unwrap_or_default() as f64 / 100.0).clamp(0.0, 1.0);
+            let combined_relevance = ((relevance * 0.75) + (score_boost * 0.25)).clamp(0.0, 1.0);
+
+            if combined_relevance < 0.52 {
+                continue;
+            }
+
+            let preview_url = format!(
+                "https://coverartarchive.org/release/{}/front-500",
+                release.id
+            );
+            let image_url = format!("https://coverartarchive.org/release/{}/front", release.id);
+
+            push_candidate_seed(
+                &mut seeds,
+                &mut seen_urls,
+                AlbumArtCandidateSeed {
+                    image_url,
+                    preview_url,
+                    label: format!("{candidate_artist} • {candidate_album}"),
+                    source: "MusicBrainz".to_string(),
+                    source_priority: 0.88,
+                    relevance_hint: combined_relevance,
+                },
+            );
+        }
+    }
+
+    seeds
+}
+
+fn fetch_album_art_candidates(
+    client: &Client,
+    artist_name: &str,
+    album_name: &str,
+) -> Vec<AlbumArtCandidateSeed> {
+    let queries = build_album_art_queries(artist_name, album_name);
+    let mut seeds = Vec::new();
+    let mut seen_urls = HashSet::new();
+
+    for seed in fetch_itunes_album_art_candidates(client, artist_name, album_name, &queries)
+        .into_iter()
+        .chain(fetch_deezer_album_art_candidates(
+            client,
+            artist_name,
+            album_name,
+        ))
+        .chain(fetch_musicbrainz_album_art_candidates(
+            client,
+            artist_name,
+            album_name,
+        ))
+        .chain(fetch_audiodb_album_art_candidates(
+            client,
+            artist_name,
+            album_name,
+        ))
+    {
+        push_candidate_seed(&mut seeds, &mut seen_urls, seed);
+    }
+
+    seeds
+}
+
+fn probe_album_art_candidate(
+    client: &Client,
+    seed: &AlbumArtCandidateSeed,
+) -> Option<AlbumArtCandidateMetadata> {
+    let preview_response = client
+        .get(&seed.preview_url)
+        .send()
+        .ok()?
+        .error_for_status()
+        .ok()?;
+    let file_size_bytes = preview_response
+        .content_length()
+        .map(|value| value as usize)
+        .unwrap_or_default();
+    let content_type = preview_response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+
+    if !content_type.starts_with("image/") && !content_type.is_empty() {
+        return None;
+    }
+
+    let bytes = preview_response.bytes().ok()?;
+    let image = image::load_from_memory(&bytes).ok()?;
+    let (width, height) = image.dimensions();
+
+    Some(AlbumArtCandidateMetadata {
+        image_url: seed.image_url.clone(),
+        preview_url: seed.preview_url.clone(),
+        label: seed.label.clone(),
+        source: seed.source.clone(),
+        source_priority: seed.source_priority,
+        width,
+        height,
+        file_size_bytes: file_size_bytes.max(bytes.len()),
+        relevance_hint: seed.relevance_hint,
+    })
+}
+
+fn filter_album_art_candidates(
+    candidates: Vec<AlbumArtCandidateMetadata>,
+) -> Vec<AlbumArtCandidateMetadata> {
+    candidates
+        .into_iter()
+        .filter(|candidate| candidate.width >= 300 && candidate.height >= 300)
+        .filter(|candidate| {
+            let ratio = candidate.width as f64 / candidate.height as f64;
+            (0.9..=1.1).contains(&ratio)
+        })
+        .filter(|candidate| candidate.file_size_bytes >= 12_000)
+        .filter(|candidate| candidate.relevance_hint >= 0.5)
+        .collect()
+}
+
+fn score_album_art_candidate(candidate: &AlbumArtCandidateMetadata) -> f64 {
+    let max_dimension = candidate.width.max(candidate.height) as f64;
+    let min_dimension = candidate.width.min(candidate.height) as f64;
+    let ratio = candidate.width as f64 / candidate.height as f64;
+    let square_score = 1.0 - (1.0 - ratio).abs().min(0.2) / 0.2;
+    let resolution_score = (max_dimension / 1200.0).clamp(0.0, 1.0);
+    let sharpness_score = (min_dimension / 1000.0).clamp(0.0, 1.0);
+    let file_size_score = (candidate.file_size_bytes as f64 / 350_000.0).clamp(0.0, 1.0);
+
+    (candidate.relevance_hint * 0.34
+        + square_score * 0.22
+        + resolution_score * 0.2
+        + sharpness_score * 0.12
+        + file_size_score * 0.06
+        + candidate.source_priority * 0.06)
+        * 100.0
+}
+
+fn score_album_art_candidates(
+    candidates: Vec<AlbumArtCandidateMetadata>,
+) -> Vec<AlbumArtCandidate> {
+    candidates
+        .into_iter()
+        .map(|candidate| {
+            let score = score_album_art_candidate(&candidate);
+
+            AlbumArtCandidate {
+                image_url: candidate.image_url,
+                preview_url: candidate.preview_url,
+                label: candidate.label,
+                source: candidate.source,
+                width: candidate.width,
+                height: candidate.height,
+                file_size_bytes: candidate.file_size_bytes,
+                score,
+            }
+        })
+        .collect()
+}
+
+fn sort_album_art_candidates(mut candidates: Vec<AlbumArtCandidate>) -> Vec<AlbumArtCandidate> {
+    candidates.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| (right.width * right.height).cmp(&(left.width * left.height)))
+    });
+    candidates
+}
+
+fn search_album_art_candidates(
+    artist_name: &str,
+    album_name: &str,
+) -> Result<Vec<AlbumArtCandidate>, String> {
+    let client = Client::builder()
+        .user_agent("qwaan-music-player/0.1.0")
+        .timeout(Duration::from_secs(12))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let seeds = fetch_album_art_candidates(&client, artist_name, album_name);
+    if seeds.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let hydrated = seeds
+        .par_iter()
+        .filter_map(|seed| probe_album_art_candidate(&client, seed))
+        .collect::<Vec<_>>();
+
+    let filtered = filter_album_art_candidates(hydrated);
+    let scored = score_album_art_candidates(filtered);
+    let mut sorted = sort_album_art_candidates(scored);
+
+    if sorted.len() > 60 {
+        sorted.truncate(60);
+    }
+
+    Ok(sorted)
 }
 
 fn download_cover_art(image_url: &str) -> Result<Vec<u8>, String> {
@@ -742,7 +1353,24 @@ fn download_cover_art(image_url: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
-fn preferred_edit_tag_type(path: &Path, tagged_file: &impl TaggedFileExt) -> Option<lofty::tag::TagType> {
+fn load_cover_art(source: &str) -> Result<Vec<u8>, String> {
+    let trimmed = source.trim();
+
+    if trimmed.is_empty() {
+        return Err("Album cover source was empty.".to_string());
+    }
+
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return download_cover_art(trimmed);
+    }
+
+    std::fs::read(trimmed).map_err(|e| format!("Failed to read local cover image {}: {}", trimmed, e))
+}
+
+fn preferred_edit_tag_type(
+    path: &Path,
+    tagged_file: &impl TaggedFileExt,
+) -> Option<lofty::tag::TagType> {
     let extension = path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -759,7 +1387,10 @@ fn preferred_edit_tag_type(path: &Path, tagged_file: &impl TaggedFileExt) -> Opt
 
     if tagged_file.tag_support(preferred).is_writable() {
         Some(preferred)
-    } else if tagged_file.tag_support(tagged_file.primary_tag_type()).is_writable() {
+    } else if tagged_file
+        .tag_support(tagged_file.primary_tag_type())
+        .is_writable()
+    {
         Some(tagged_file.primary_tag_type())
     } else {
         None
@@ -804,8 +1435,8 @@ fn apply_common_tag_fields(
     }
 
     if let Some(cover_art) = cover_art {
-        let mut picture = Picture::from_reader(&mut Cursor::new(cover_art))
-            .map_err(|e| e.to_string())?;
+        let mut picture =
+            Picture::from_reader(&mut Cursor::new(cover_art)).map_err(|e| e.to_string())?;
         picture.set_pic_type(PictureType::CoverFront);
         tag.remove_picture_type(PictureType::CoverFront);
         tag.push_picture(picture);
@@ -896,7 +1527,10 @@ fn extract_metadata(path: &Path, artwork_dir: &Path) -> TrackRow {
     let tagged_result = std::panic::catch_unwind(|| Probe::open(path).and_then(|p| p.read()));
 
     if let Ok(Ok(tagged_file)) = tagged_result {
-        if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+        if let Some(tag) = tagged_file
+            .primary_tag()
+            .or_else(|| tagged_file.first_tag())
+        {
             if let Some(v) = tag.title() {
                 if !v.trim().is_empty() {
                     title = v.to_string();
@@ -939,13 +1573,8 @@ fn extract_metadata(path: &Path, artwork_dir: &Path) -> TrackRow {
             track_number = tag.track().map(|t| t as i32);
 
             if let Some(picture) = tag.pictures().first() {
-                artwork_path = save_artwork(
-                    path,
-                    &album_artist,
-                    &album,
-                    artwork_dir,
-                    picture.data(),
-                );
+                artwork_path =
+                    save_artwork(path, &album_artist, &album, artwork_dir, picture.data());
             }
         }
     }
@@ -975,8 +1604,8 @@ fn fallback_duration_secs(path: &Path) -> f64 {
 }
 
 fn get_app_data_dir() -> Result<PathBuf, String> {
-    let base = std::env::var("LOCALAPPDATA")
-        .map_err(|_| "Could not find LOCALAPPDATA".to_string())?;
+    let base =
+        std::env::var("LOCALAPPDATA").map_err(|_| "Could not find LOCALAPPDATA".to_string())?;
 
     let mut path = PathBuf::from(base);
     path.push("QwaanMusicPlayer");
@@ -1120,7 +1749,9 @@ fn ensure_home_tables(conn: &Connection) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
 
     let existing_profile = conn
-        .query_row("SELECT id FROM user_profile LIMIT 1", [], |row| row.get::<_, String>(0))
+        .query_row("SELECT id FROM user_profile LIMIT 1", [], |row| {
+            row.get::<_, String>(0)
+        })
         .optional()
         .map_err(|e| e.to_string())?;
 
@@ -1143,13 +1774,76 @@ fn ensure_home_tables(conn: &Connection) -> Result<(), String> {
 
 fn achievement_catalog() -> Vec<AchievementPayload> {
     vec![
-        AchievementPayload { id: "hours-25".into(), name: "25 Hours Listened".into(), description: "Spend 25 hours with your library.".into(), icon: "clock".into(), category: "time".into(), requirement_type: "hours".into(), requirement_value: 25, xp_reward: 120 },
-        AchievementPayload { id: "hours-100".into(), name: "100 Hours Club".into(), description: "Reach 100 hours of playback.".into(), icon: "spark".into(), category: "time".into(), requirement_type: "hours".into(), requirement_value: 100, xp_reward: 400 },
-        AchievementPayload { id: "streak-7".into(), name: "7 Day Streak".into(), description: "Listen 7 days in a row.".into(), icon: "flame".into(), category: "streak".into(), requirement_type: "streak".into(), requirement_value: 7, xp_reward: 160 },
-        AchievementPayload { id: "streak-30".into(), name: "30 Day Listener".into(), description: "Keep your listening streak alive for 30 days.".into(), icon: "medal".into(), category: "streak".into(), requirement_type: "streak".into(), requirement_value: 30, xp_reward: 420 },
-        AchievementPayload { id: "repeat-10".into(), name: "Repeat Master".into(), description: "Replay the same track 10 times.".into(), icon: "repeat".into(), category: "behavior".into(), requirement_type: "repeat_track".into(), requirement_value: 10, xp_reward: 180 },
-        AchievementPayload { id: "artists-25".into(), name: "Explorer".into(), description: "Discover 25 unique artists.".into(), icon: "compass".into(), category: "discovery".into(), requirement_type: "unique_artists".into(), requirement_value: 25, xp_reward: 220 },
-        AchievementPayload { id: "genre-rock-20".into(), name: "Rock Loyalist".into(), description: "Spend 20 hours listening to Rock.".into(), icon: "bolt".into(), category: "genre".into(), requirement_type: "genre_hours:rock".into(), requirement_value: 20, xp_reward: 160 },
+        AchievementPayload {
+            id: "hours-25".into(),
+            name: "25 Hours Listened".into(),
+            description: "Spend 25 hours with your library.".into(),
+            icon: "clock".into(),
+            category: "time".into(),
+            requirement_type: "hours".into(),
+            requirement_value: 25,
+            xp_reward: 120,
+        },
+        AchievementPayload {
+            id: "hours-100".into(),
+            name: "100 Hours Club".into(),
+            description: "Reach 100 hours of playback.".into(),
+            icon: "spark".into(),
+            category: "time".into(),
+            requirement_type: "hours".into(),
+            requirement_value: 100,
+            xp_reward: 400,
+        },
+        AchievementPayload {
+            id: "streak-7".into(),
+            name: "7 Day Streak".into(),
+            description: "Listen 7 days in a row.".into(),
+            icon: "flame".into(),
+            category: "streak".into(),
+            requirement_type: "streak".into(),
+            requirement_value: 7,
+            xp_reward: 160,
+        },
+        AchievementPayload {
+            id: "streak-30".into(),
+            name: "30 Day Listener".into(),
+            description: "Keep your listening streak alive for 30 days.".into(),
+            icon: "medal".into(),
+            category: "streak".into(),
+            requirement_type: "streak".into(),
+            requirement_value: 30,
+            xp_reward: 420,
+        },
+        AchievementPayload {
+            id: "repeat-10".into(),
+            name: "Repeat Master".into(),
+            description: "Replay the same track 10 times.".into(),
+            icon: "repeat".into(),
+            category: "behavior".into(),
+            requirement_type: "repeat_track".into(),
+            requirement_value: 10,
+            xp_reward: 180,
+        },
+        AchievementPayload {
+            id: "artists-25".into(),
+            name: "Explorer".into(),
+            description: "Discover 25 unique artists.".into(),
+            icon: "compass".into(),
+            category: "discovery".into(),
+            requirement_type: "unique_artists".into(),
+            requirement_value: 25,
+            xp_reward: 220,
+        },
+        AchievementPayload {
+            id: "genre-rock-20".into(),
+            name: "Rock Loyalist".into(),
+            description: "Spend 20 hours listening to Rock.".into(),
+            icon: "bolt".into(),
+            category: "genre".into(),
+            requirement_type: "genre_hours:rock".into(),
+            requirement_value: 20,
+            xp_reward: 160,
+        },
     ]
 }
 
@@ -1334,8 +2028,16 @@ fn compute_aggregated_stats(conn: &Connection) -> Result<AggregatedStatsPayload,
     let mut current_session = 0_i64;
 
     for row in rows {
-        let (track_id, artist_id, _album_id, genre, duration_played, _completed, timestamp, _skipped) =
-            row.map_err(|e| e.to_string())?;
+        let (
+            track_id,
+            artist_id,
+            _album_id,
+            genre,
+            duration_played,
+            _completed,
+            timestamp,
+            _skipped,
+        ) = row.map_err(|e| e.to_string())?;
 
         total += duration_played;
         if timestamp >= today_start {
@@ -1352,10 +2054,22 @@ fn compute_aggregated_stats(conn: &Connection) -> Result<AggregatedStatsPayload,
         }
 
         *daily_map.entry(start_of_day(timestamp)).or_insert(0) += duration_played;
-        *weekly_map.entry(start_of_day(timestamp - ((timestamp / 86_400) % 7) * 86_400)).or_insert(0) += duration_played;
-        *genre_map.entry(if genre.trim().is_empty() { "Unknown".into() } else { genre.clone() }).or_insert(0) += duration_played;
+        *weekly_map
+            .entry(start_of_day(
+                timestamp - ((timestamp / 86_400) % 7) * 86_400,
+            ))
+            .or_insert(0) += duration_played;
+        *genre_map
+            .entry(if genre.trim().is_empty() {
+                "Unknown".into()
+            } else {
+                genre.clone()
+            })
+            .or_insert(0) += duration_played;
         listened_days.insert(start_of_day(timestamp));
-        *hour_map.entry((timestamp / 3_600).rem_euclid(24)).or_insert(0) += duration_played;
+        *hour_map
+            .entry((timestamp / 3_600).rem_euclid(24))
+            .or_insert(0) += duration_played;
         *repeat_counts.entry(track_id.clone()).or_insert(0) += 1;
         first_artist_seen.entry(artist_id).or_insert(timestamp);
         first_track_seen.entry(track_id).or_insert(timestamp);
@@ -1573,7 +2287,13 @@ fn evaluate_achievements(
         let unlocked_at = if unlocked {
             existing
                 .as_ref()
-                .and_then(|(_, existing_unlocked, timestamp)| if *existing_unlocked == 1 { *timestamp } else { None })
+                .and_then(|(_, existing_unlocked, timestamp)| {
+                    if *existing_unlocked == 1 {
+                        *timestamp
+                    } else {
+                        None
+                    }
+                })
                 .or(Some(now))
         } else {
             None
@@ -1588,7 +2308,12 @@ fn evaluate_achievements(
                 unlocked = excluded.unlocked,
                 unlocked_at = COALESCE(user_achievements.unlocked_at, excluded.unlocked_at)
             "#,
-            params![achievement_id.clone(), progress, if unlocked { 1 } else { 0 }, unlocked_at],
+            params![
+                achievement_id.clone(),
+                progress,
+                if unlocked { 1 } else { 0 },
+                unlocked_at
+            ],
         )
         .map_err(|e| e.to_string())?;
 
@@ -1603,7 +2328,11 @@ fn evaluate_achievements(
     let achievement_reward_xp: i32 = results
         .iter()
         .filter(|achievement| achievement.unlocked)
-        .map(|achievement| *catalog_rewards.get(&achievement.achievement_id).unwrap_or(&0))
+        .map(|achievement| {
+            *catalog_rewards
+                .get(&achievement.achievement_id)
+                .unwrap_or(&0)
+        })
         .sum();
     let listening_xp = (stats.total_listening_time / 60).min(i32::MAX as i64) as i32;
     let total_xp = listening_xp + achievement_reward_xp;
@@ -1628,7 +2357,10 @@ fn build_recent_activity(
     if stats.new_artists_this_week > 0 {
         items.push(ActivityFeedItem {
             id: "discoveries".to_string(),
-            message: format!("You discovered {} new artists this week.", stats.new_artists_this_week),
+            message: format!(
+                "You discovered {} new artists this week.",
+                stats.new_artists_this_week
+            ),
             timestamp: now,
         });
     }
@@ -1636,7 +2368,10 @@ fn build_recent_activity(
     if stats.listening_streak > 0 {
         items.push(ActivityFeedItem {
             id: "streak".to_string(),
-            message: format!("You are on a {} day listening streak.", stats.listening_streak),
+            message: format!(
+                "You are on a {} day listening streak.",
+                stats.listening_streak
+            ),
             timestamp: now - 1,
         });
     }
@@ -1644,7 +2379,10 @@ fn build_recent_activity(
     if stats.longest_session > 0 {
         items.push(ActivityFeedItem {
             id: "session".to_string(),
-            message: format!("Your longest session lasted {} minutes.", stats.longest_session / 60),
+            message: format!(
+                "Your longest session lasted {} minutes.",
+                stats.longest_session / 60
+            ),
             timestamp: now - 2,
         });
     }
@@ -1662,7 +2400,16 @@ fn build_recent_activity(
     items
 }
 
-fn recalculate_home_state(conn: &Connection) -> Result<(AggregatedStatsPayload, Vec<UserAchievementPayload>, UserProfilePayload), String> {
+fn recalculate_home_state(
+    conn: &Connection,
+) -> Result<
+    (
+        AggregatedStatsPayload,
+        Vec<UserAchievementPayload>,
+        UserProfilePayload,
+    ),
+    String,
+> {
     let stats = compute_aggregated_stats(conn)?;
     store_stats_cache(conn, &stats)?;
     let achievements = evaluate_achievements(conn, &stats)?;
@@ -2172,7 +2919,7 @@ fn save_album_metadata(
         .artwork_url
         .as_deref()
         .filter(|value| !value.trim().is_empty())
-        .map(download_cover_art)
+        .map(load_cover_art)
         .transpose()?;
 
     let mut failed_files = Vec::new();
@@ -2397,8 +3144,8 @@ fn play_track(
     let path_buf = PathBuf::from(&path);
     let file = File::open(&path_buf).map_err(|e| format!("Failed to open file: {}", e))?;
     let reader = BufReader::new(file);
-    let decoder = Decoder::try_from(reader)
-        .map_err(|e| format!("Failed to decode audio file: {}", e))?;
+    let decoder =
+        Decoder::try_from(reader).map_err(|e| format!("Failed to decode audio file: {}", e))?;
     let mut duration_secs = decoder
         .total_duration()
         .map(|duration| duration.as_secs_f64())
@@ -2414,8 +3161,14 @@ fn play_track(
     let player = Player::connect_new(handle.mixer());
     player.append(decoder);
 
-    let mut state = playback.lock().map_err(|_| "Playback lock failed".to_string())?;
-    let volume = if state.volume <= 0.0 { 1.0 } else { state.volume };
+    let mut state = playback
+        .lock()
+        .map_err(|_| "Playback lock failed".to_string())?;
+    let volume = if state.volume <= 0.0 {
+        1.0
+    } else {
+        state.volume
+    };
 
     state.clear();
     state.handle = Some(handle);
@@ -2436,10 +3189,10 @@ fn play_track(
 }
 
 #[tauri::command]
-fn toggle_playback(
-    playback: State<Mutex<PlaybackEngine>>,
-) -> Result<PlaybackStatePayload, String> {
-    let state = playback.lock().map_err(|_| "Playback lock failed".to_string())?;
+fn toggle_playback(playback: State<Mutex<PlaybackEngine>>) -> Result<PlaybackStatePayload, String> {
+    let state = playback
+        .lock()
+        .map_err(|_| "Playback lock failed".to_string())?;
 
     let player = match state.player.as_ref() {
         Some(player) => player,
@@ -2456,10 +3209,10 @@ fn toggle_playback(
 }
 
 #[tauri::command]
-fn stop_playback(
-    playback: State<Mutex<PlaybackEngine>>,
-) -> Result<PlaybackStatePayload, String> {
-    let mut state = playback.lock().map_err(|_| "Playback lock failed".to_string())?;
+fn stop_playback(playback: State<Mutex<PlaybackEngine>>) -> Result<PlaybackStatePayload, String> {
+    let mut state = playback
+        .lock()
+        .map_err(|_| "Playback lock failed".to_string())?;
     state.clear();
     Ok(state.to_payload())
 }
@@ -2468,7 +3221,9 @@ fn stop_playback(
 fn get_playback_state(
     playback: State<Mutex<PlaybackEngine>>,
 ) -> Result<PlaybackStatePayload, String> {
-    let state = playback.lock().map_err(|_| "Playback lock failed".to_string())?;
+    let state = playback
+        .lock()
+        .map_err(|_| "Playback lock failed".to_string())?;
     Ok(state.to_payload())
 }
 
@@ -2487,7 +3242,9 @@ fn set_playback_volume(
     playback: State<Mutex<PlaybackEngine>>,
     volume: f32,
 ) -> Result<PlaybackStatePayload, String> {
-    let mut state = playback.lock().map_err(|_| "Playback lock failed".to_string())?;
+    let mut state = playback
+        .lock()
+        .map_err(|_| "Playback lock failed".to_string())?;
     let clamped = volume.clamp(0.0, 1.0);
     state.volume = clamped;
 
@@ -2504,7 +3261,9 @@ fn restore_persisted_playback(
     payload: RestorePlaybackSessionPayload,
 ) -> Result<PlaybackStatePayload, String> {
     if payload.current_path.trim().is_empty() {
-        let mut state = playback.lock().map_err(|_| "Playback lock failed".to_string())?;
+        let mut state = playback
+            .lock()
+            .map_err(|_| "Playback lock failed".to_string())?;
         state.volume = payload.volume.clamp(0.0, 1.0);
         return Ok(state.to_payload());
     }
@@ -2517,8 +3276,8 @@ fn restore_persisted_playback(
 
     let file = File::open(&path_buf).map_err(|e| format!("Failed to open file: {}", e))?;
     let reader = BufReader::new(file);
-    let decoder = Decoder::try_from(reader)
-        .map_err(|e| format!("Failed to decode audio file: {}", e))?;
+    let decoder =
+        Decoder::try_from(reader).map_err(|e| format!("Failed to decode audio file: {}", e))?;
     let mut duration_secs = decoder
         .total_duration()
         .map(|duration| duration.as_secs_f64())
@@ -2550,7 +3309,9 @@ fn restore_persisted_playback(
         player.pause();
     }
 
-    let mut state = playback.lock().map_err(|_| "Playback lock failed".to_string())?;
+    let mut state = playback
+        .lock()
+        .map_err(|_| "Playback lock failed".to_string())?;
     state.clear();
     state.handle = Some(handle);
     state.player = Some(player);
@@ -2569,7 +3330,9 @@ fn seek_playback(
     playback: State<Mutex<PlaybackEngine>>,
     position_secs: f64,
 ) -> Result<PlaybackStatePayload, String> {
-    let state = playback.lock().map_err(|_| "Playback lock failed".to_string())?;
+    let state = playback
+        .lock()
+        .map_err(|_| "Playback lock failed".to_string())?;
     let player = match state.player.as_ref() {
         Some(player) => player,
         None => return Ok(state.to_payload()),

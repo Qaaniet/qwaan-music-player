@@ -151,17 +151,17 @@ function WidgetShell({
   onMoveDown: () => void;
 }) {
   return (
-    <section className="win-pane-strong win-card-hover rounded-[28px] px-5 py-5">
+    <section className="win-pane-strong win-card-hover rounded-[8px] px-5 py-5">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <div className="text-[15px] font-semibold text-white/92">{title}</div>
-          <div className="mt-1 text-[12px] text-white/48">{subtitle}</div>
+          <div className="text-[13px] font-semibold text-[var(--win-text)]">{title}</div>
+          <div className="mt-1 text-[11.5px] text-[var(--win-text-secondary)]">{subtitle}</div>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={onMoveUp} className="win-button inline-flex h-8 items-center rounded-[12px] px-3 text-[12px] text-white/70 hover:text-white">
+          <button type="button" onClick={onMoveUp} className="win-button inline-flex h-8 items-center rounded-[4px] px-3 text-[12px] text-[var(--win-text-secondary)] hover:text-[var(--win-text)]">
             Up
           </button>
-          <button type="button" onClick={onMoveDown} className="win-button inline-flex h-8 items-center rounded-[12px] px-3 text-[12px] text-white/70 hover:text-white">
+          <button type="button" onClick={onMoveDown} className="win-button inline-flex h-8 items-center rounded-[4px] px-3 text-[12px] text-[var(--win-text-secondary)] hover:text-[var(--win-text)]">
             Down
           </button>
         </div>
@@ -195,14 +195,14 @@ function RankedList({
         const pinned = favoriteKeys.has(item.id);
         const canPlay = kind === "track";
         return (
-          <div key={`${kind}-${item.id}`} className="flex items-center gap-3 rounded-[18px] bg-white/[0.03] px-3 py-3">
-            <div className="w-5 text-[12px] text-white/36">{index + 1}</div>
-            <div className="h-12 w-12 overflow-hidden rounded-[14px] border border-white/8 bg-white/[0.04]">
+          <div key={`${kind}-${item.id}`} className="flex items-center gap-3 rounded-[6px] bg-[var(--win-input)] px-3 py-3">
+            <div className="w-5 text-[11px] text-[var(--win-text-tertiary)]">{index + 1}</div>
+            <div className="h-12 w-12 overflow-hidden rounded-[4px] border border-[var(--win-border)] bg-[var(--win-pane)]">
               <Artwork src={item.artwork_path} label={item.title} />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium text-white/90">{item.title}</div>
-              <div className="mt-1 truncate text-[12px] text-white/48">
+              <div className="truncate text-[12.5px] font-medium text-[var(--win-text)]">{item.title}</div>
+              <div className="mt-1 truncate text-[11.5px] text-[var(--win-text-secondary)]">
                 {item.subtitle} • {item.plays} plays • {formatMinutes(item.seconds)}
               </div>
             </div>
@@ -221,7 +221,7 @@ function RankedList({
                   year: null,
                   track_number: null,
                 })}
-                className="win-button inline-flex h-8 items-center rounded-[12px] px-3 text-[12px] text-white/78 hover:text-white"
+                className="win-button inline-flex h-8 items-center rounded-[4px] px-3 text-[12px] text-[var(--win-text-secondary)] hover:text-[var(--win-text)]"
               >
                 Play
               </button>
@@ -238,7 +238,7 @@ function RankedList({
                   pinned: !pinned,
                 })}
               className={`inline-flex h-8 items-center rounded-[12px] px-3 text-[12px] ${
-                pinned ? "win-button-primary" : "win-button text-white/78 hover:text-white"
+                pinned ? "win-button-primary" : "win-button text-[var(--win-text-secondary)] hover:text-[var(--win-text)]"
               }`}
             >
               {pinned ? "Pinned" : "Pin"}

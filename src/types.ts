@@ -75,8 +75,13 @@ export type AlbumSummary = {
 
 export type AlbumArtCandidate = {
   image_url: string;
+  preview_url: string;
   label: string;
   source: string;
+  width: number;
+  height: number;
+  file_size_bytes: number;
+  score: number;
 };
 
 export type EditableTrackInput = {

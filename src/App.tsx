@@ -20,13 +20,21 @@ import { GenreDetailsView } from "./components/GenreDetailsView";
 import { GenreGrid } from "./components/GenreGrid";
 import { HomePage, type HomeWidgetId } from "./components/HomePage";
 import { PlayerBar } from "./components/PlayerBar";
-import { SettingsPage } from "./components/SettingsPage";
+import {
+  SettingsPage,
+  type SettingsPanelId,
+  type SettingsPanelState,
+} from "./components/SettingsPage";
 import { Sidebar } from "./components/Sidebar";
 import { SongTable } from "./components/SongTable";
 import { StickySectionNav } from "./components/StickySectionNav";
 import { TopBar } from "./components/TopBar";
 import { WindowChrome } from "./components/WindowChrome";
-import { extractAccentFromArtwork } from "./lib/artworkAccent";
+import {
+  blendArtworkTheme,
+  extractThemeFromArtwork,
+  type ArtworkThemePalette,
+} from "./lib/artworkAccent";
 import {
   buildAlbumSummaries,
   buildGenreSummaries,
@@ -91,6 +99,20 @@ type NavigationSnapshot = {
   selectedGenreDetailsName: string | null;
 };
 
+type NavigationSectionKey =
+  | "home"
+  | "settings"
+  | "library:albums"
+  | "library:artists"
+  | "library:songs"
+  | "library:genres";
+
+type SectionNavigationState = {
+  back: NavigationSnapshot[];
+  forward: NavigationSnapshot[];
+  last: NavigationSnapshot | null;
+};
+
 type ActiveListeningSession = {
   eventId: string;
   trackPath: string;
@@ -102,6 +124,13 @@ type ActiveListeningSession = {
   durationHint: number;
 };
 
+type PlaybackTransitionMode = "reset" | "push-current" | "preserve";
+
+type StartPlaybackOptions = {
+  queue?: TrackRow[];
+  transitionMode?: PlaybackTransitionMode;
+};
+
 const DEFAULT_HOME_WIDGET_ORDER: HomeWidgetId[] = [
   "profile",
   "stats",
@@ -109,6 +138,28 @@ const DEFAULT_HOME_WIDGET_ORDER: HomeWidgetId[] = [
   "favorites",
   "activity",
 ];
+
+const DEFAULT_SETTINGS_PANEL_STATE: SettingsPanelState = {
+  appearance: false,
+  playback: false,
+  visualization: false,
+  audio: false,
+  layout: false,
+  library: false,
+  "library-locations": false,
+  "library-refresh": false,
+  profiles: false,
+  advanced: false,
+  "personalization-hub": false,
+  about: false,
+};
+
+const DEFAULT_ARTWORK_THEME: ArtworkThemePalette = {
+  accent: "#7fb3ff",
+  accentStrong: "#abd0ff",
+  accentSoft: "#6698df",
+  accentGlow: "#466a9d",
+};
 
 function shuffleTracks(tracks: TrackRow[]) {
   const copy = [...tracks];
@@ -121,15 +172,57 @@ function shuffleTracks(tracks: TrackRow[]) {
   return copy;
 }
 
+function buildNavigationSectionKey(snapshot: NavigationSnapshot): NavigationSectionKey {
+  if (snapshot.page === "home") {
+    return "home";
+  }
+
+  if (snapshot.page === "settings") {
+    return "settings";
+  }
+
+  return `library:${snapshot.view}` as NavigationSectionKey;
+}
+
+function createEmptySectionNavigationState(): SectionNavigationState {
+  return {
+    back: [],
+    forward: [],
+    last: null,
+  };
+}
+
+function createNavigationSections(): Record<NavigationSectionKey, SectionNavigationState> {
+  return {
+    home: createEmptySectionNavigationState(),
+    settings: createEmptySectionNavigationState(),
+    "library:albums": createEmptySectionNavigationState(),
+    "library:artists": createEmptySectionNavigationState(),
+    "library:songs": createEmptySectionNavigationState(),
+    "library:genres": createEmptySectionNavigationState(),
+  };
+}
+
 function App() {
   const [preferences, setPreferences] = useState<AppPreferences>(() => createDefaultPreferences());
+  const [systemPrefersLight, setSystemPrefersLight] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+
+    return window.matchMedia("(prefers-color-scheme: light)").matches;
+  });
   const [resolvedAccent, setResolvedAccent] = useState("#7fb3ff");
+  const [resolvedArtworkTheme, setResolvedArtworkTheme] =
+    useState<ArtworkThemePalette>(DEFAULT_ARTWORK_THEME);
   const [page, setPage] = useState<AppPage>("home");
   const [tracks, setTracks] = useState<TrackRow[]>([]);
   const [artists, setArtists] = useState<ArtistRow[]>([]);
   const [albums, setAlbums] = useState<AlbumRow[]>([]);
   const [homeData, setHomeData] = useState<HomeDataPayload | null>(null);
   const [homeWidgetOrder, setHomeWidgetOrder] = useState<HomeWidgetId[]>(DEFAULT_HOME_WIDGET_ORDER);
+  const [settingsPanelState, setSettingsPanelState] =
+    useState<SettingsPanelState>(DEFAULT_SETTINGS_PANEL_STATE);
   const [status, setStatus] = useState("Ready");
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress] = useState<ScanProgressPayload | null>(null);
@@ -184,10 +277,9 @@ function App() {
   const hasLoadedSessionRef = useRef(false);
   const lastSavedSessionRef = useRef("");
   const playbackRef = useRef(playback);
+  const playbackHistoryRef = useRef<string[]>([]);
   const activeListeningSessionRef = useRef<ActiveListeningSession | null>(null);
-  const lastNavigationSnapshotRef = useRef<NavigationSnapshot | null>(null);
-  const backHistoryRef = useRef<NavigationSnapshot[]>([]);
-  const forwardHistoryRef = useRef<NavigationSnapshot[]>([]);
+  const navigationSectionsRef = useRef(createNavigationSections());
   const suppressHistoryRef = useRef(false);
   const [libraryLocations, setLibraryLocations] = useState<string[]>([]);
 
@@ -322,6 +414,22 @@ function App() {
     });
   }, []);
 
+  const toggleSettingsPanel = useCallback((panelId: SettingsPanelId) => {
+    setSettingsPanelState((current) => ({
+      ...current,
+      [panelId]: !current[panelId],
+    }));
+  }, []);
+
+  const openLibrarySettings = useCallback(() => {
+    setSettingsPanelState((current) => ({
+      ...current,
+      library: true,
+      "library-locations": true,
+    }));
+    setPage("settings");
+  }, []);
+
   const handleSaveHomeProfile = useCallback(async (payload: SaveProfilePayload) => {
     const profile = await invoke<UserProfile>("save_user_profile", { payload });
     setHomeData((current) => (current ? { ...current, profile } : current));
@@ -343,14 +451,23 @@ function App() {
   }, []);
 
   const navigateBack = useCallback(() => {
-    const previous = backHistoryRef.current.pop();
-    const current = lastNavigationSnapshotRef.current;
+    const currentSnapshot: NavigationSnapshot = {
+      page,
+      view,
+      selectedAlbumKey,
+      selectedArtistDetailsName,
+      selectedGenreDetailsName,
+    };
+    const sectionKey = buildNavigationSectionKey(currentSnapshot);
+    const sectionHistory = navigationSectionsRef.current[sectionKey];
+    const previous = sectionHistory.back.pop();
+    const current = sectionHistory.last ?? currentSnapshot;
 
     if (!previous || !current) {
       return;
     }
 
-    forwardHistoryRef.current.push(current);
+    sectionHistory.forward.push(current);
     if (
       previous.page === "library" &&
       !previous.selectedAlbumKey &&
@@ -363,18 +480,35 @@ function App() {
       };
       setHiddenLibraryView(previous.view);
     }
+    sectionHistory.last = previous;
     applyNavigationSnapshot(previous);
-  }, [applyNavigationSnapshot]);
+  }, [
+    applyNavigationSnapshot,
+    page,
+    selectedAlbumKey,
+    selectedArtistDetailsName,
+    selectedGenreDetailsName,
+    view,
+  ]);
 
   const navigateForward = useCallback(() => {
-    const next = forwardHistoryRef.current.pop();
-    const current = lastNavigationSnapshotRef.current;
+    const currentSnapshot: NavigationSnapshot = {
+      page,
+      view,
+      selectedAlbumKey,
+      selectedArtistDetailsName,
+      selectedGenreDetailsName,
+    };
+    const sectionKey = buildNavigationSectionKey(currentSnapshot);
+    const sectionHistory = navigationSectionsRef.current[sectionKey];
+    const next = sectionHistory.forward.pop();
+    const current = sectionHistory.last ?? currentSnapshot;
 
     if (!next || !current) {
       return;
     }
 
-    backHistoryRef.current.push(current);
+    sectionHistory.back.push(current);
     if (
       next.page === "library" &&
       !next.selectedAlbumKey &&
@@ -387,8 +521,16 @@ function App() {
       };
       setHiddenLibraryView(next.view);
     }
+    sectionHistory.last = next;
     applyNavigationSnapshot(next);
-  }, [applyNavigationSnapshot]);
+  }, [
+    applyNavigationSnapshot,
+    page,
+    selectedAlbumKey,
+    selectedArtistDetailsName,
+    selectedGenreDetailsName,
+    view,
+  ]);
 
   const patchPreferences = useCallback((updater: (current: AppPreferences) => AppPreferences) => {
     setPreferences((current) => updater(current));
@@ -638,7 +780,11 @@ function App() {
       const savedWidgetOrder = window.localStorage.getItem("qwaan.homeWidgetOrder");
 
       setPreferences(loadedPreferences);
-      setResolvedAccent(loadedPreferences.appearance.manualAccent);
+      setResolvedAccent(withIntensity(
+        loadedPreferences.appearance.manualAccent,
+        loadedPreferences.appearance.accentIntensity,
+      ));
+      setResolvedArtworkTheme(DEFAULT_ARTWORK_THEME);
 
       if (savedLibraryLocations) {
         const parsed = JSON.parse(savedLibraryLocations);
@@ -711,6 +857,7 @@ function App() {
         const { queue, currentIndex, currentTrack } = restoreQueueFromSession(session, loadedTracks);
         setCurrentQueue(queue);
         setCurrentIndex(currentIndex);
+        playbackHistoryRef.current = [];
 
         if (currentTrack && loadedPreferences.playback.resumeLastSession) {
           try {
@@ -971,6 +1118,26 @@ function App() {
     playbackRef.current = playback;
   }, [playback]);
 
+  const resolveQueueForTrack = useCallback((track: TrackRow, queue?: TrackRow[]) => {
+    const candidateQueue = queue && queue.length > 0 ? queue : [track];
+    const containsTrack = candidateQueue.some((item) => item.file_path === track.file_path);
+    return containsTrack ? candidateQueue : [track];
+  }, []);
+
+  const resolveQueueIndex = useCallback((queue: TrackRow[], trackPath: string, fallbackIndex = -1) => {
+    const liveIndex = queue.findIndex((item) => item.file_path === trackPath);
+
+    if (liveIndex >= 0) {
+      return liveIndex;
+    }
+
+    if (fallbackIndex >= 0 && fallbackIndex < queue.length) {
+      return fallbackIndex;
+    }
+
+    return -1;
+  }, []);
+
   useEffect(() => {
     const snapshot: NavigationSnapshot = {
       page,
@@ -979,35 +1146,36 @@ function App() {
       selectedArtistDetailsName,
       selectedGenreDetailsName,
     };
-    const previous = lastNavigationSnapshotRef.current;
+    const sectionKey = buildNavigationSectionKey(snapshot);
+    const sectionHistory = navigationSectionsRef.current[sectionKey];
+    const previous = sectionHistory.last;
 
     if (!previous) {
-      lastNavigationSnapshotRef.current = snapshot;
+      sectionHistory.last = snapshot;
       suppressHistoryRef.current = false;
       return;
     }
 
     const changed =
-      previous.page !== snapshot.page ||
-      previous.view !== snapshot.view ||
       previous.selectedAlbumKey !== snapshot.selectedAlbumKey ||
       previous.selectedArtistDetailsName !== snapshot.selectedArtistDetailsName ||
       previous.selectedGenreDetailsName !== snapshot.selectedGenreDetailsName;
 
     if (!changed) {
+      sectionHistory.last = snapshot;
       suppressHistoryRef.current = false;
       return;
     }
 
     if (!suppressHistoryRef.current) {
-      backHistoryRef.current.push(previous);
-      if (backHistoryRef.current.length > 48) {
-        backHistoryRef.current.shift();
+      sectionHistory.back.push(previous);
+      if (sectionHistory.back.length > 48) {
+        sectionHistory.back.shift();
       }
-      forwardHistoryRef.current = [];
+      sectionHistory.forward = [];
     }
 
-    lastNavigationSnapshotRef.current = snapshot;
+    sectionHistory.last = snapshot;
     suppressHistoryRef.current = false;
   }, [page, selectedAlbumKey, selectedArtistDetailsName, selectedGenreDetailsName, view]);
 
@@ -1121,44 +1289,93 @@ function App() {
   useEffect(() => {
     let cancelled = false;
 
-    const resolveAccent = async () => {
+    const resolveArtworkTheme = async () => {
       const manualAccent = preferences.appearance.manualAccent;
+      const normalizedManualAccent = withIntensity(
+        manualAccent,
+        preferences.appearance.accentIntensity,
+      );
+      const manualTheme: ArtworkThemePalette = {
+        accent: normalizedManualAccent,
+        accentStrong: withIntensity(
+          manualAccent,
+          Math.min(1, preferences.appearance.accentIntensity + 0.16),
+        ),
+        accentSoft: withIntensity(
+          mixHexColors(manualAccent, "#49688e", 0.34),
+          Math.max(0.2, preferences.appearance.accentIntensity * 0.72),
+        ),
+        accentGlow: withIntensity(
+          mixHexColors(manualAccent, "#213247", 0.56),
+          Math.max(0.18, preferences.appearance.accentIntensity * 0.54),
+        ),
+      };
 
-      if (!currentTrack?.artwork_path || preferences.appearance.accentMode === "manual") {
-        setResolvedAccent(withIntensity(manualAccent, preferences.appearance.accentIntensity));
+      if (preferences.appearance.accentMode === "manual" || !currentTrack?.artwork_path) {
+        if (!cancelled) {
+          setResolvedArtworkTheme(manualTheme);
+          setResolvedAccent(manualTheme.accent);
+        }
         return;
       }
 
       try {
-        const artworkAccent = await extractAccentFromArtwork(
+        const artworkTheme = await extractThemeFromArtwork(
           convertFileSrc(currentTrack.artwork_path),
-          currentTrack.artwork_path,
+          `${currentTrack.file_path}::${currentTrack.artwork_path}`,
         );
 
         if (cancelled) {
           return;
         }
 
-        const blended =
+        const selectedTheme =
           preferences.appearance.accentMode === "blend"
-            ? mixHexColors(artworkAccent, manualAccent, preferences.appearance.blendAmount)
-            : artworkAccent;
+            ? blendArtworkTheme(
+                artworkTheme,
+                manualAccent,
+                preferences.appearance.blendAmount,
+              )
+            : artworkTheme;
 
-        setResolvedAccent(withIntensity(blended, preferences.appearance.accentIntensity));
+        const normalizedTheme: ArtworkThemePalette = {
+          accent: withIntensity(
+            selectedTheme.accent,
+            preferences.appearance.accentIntensity,
+          ),
+          accentStrong: withIntensity(
+            selectedTheme.accentStrong,
+            Math.min(1, preferences.appearance.accentIntensity + 0.14),
+          ),
+          accentSoft: withIntensity(
+            selectedTheme.accentSoft,
+            Math.max(0.22, preferences.appearance.accentIntensity * 0.76),
+          ),
+          accentGlow: withIntensity(
+            selectedTheme.accentGlow,
+            Math.max(0.18, preferences.appearance.accentIntensity * 0.62),
+          ),
+        };
+
+        setResolvedArtworkTheme(normalizedTheme);
+        setResolvedAccent(normalizedTheme.accent);
       } catch {
         if (!cancelled) {
-          setResolvedAccent(withIntensity(manualAccent, preferences.appearance.accentIntensity));
+          setResolvedArtworkTheme(manualTheme);
+          setResolvedAccent(manualTheme.accent);
         }
       }
     };
 
-    void resolveAccent();
+    void resolveArtworkTheme();
 
     return () => {
       cancelled = true;
     };
   }, [
     currentTrack?.artwork_path,
+    currentTrack?.file_path,
+    playback.current_path,
     preferences.appearance.accentIntensity,
     preferences.appearance.accentMode,
     preferences.appearance.blendAmount,
@@ -1166,40 +1383,103 @@ function App() {
   ]);
 
   useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
+    const handleChange = (event: MediaQueryListEvent) => {
+      setSystemPrefersLight(event.matches);
+    };
+
+    setSystemPrefersLight(mediaQuery.matches);
+    mediaQuery.addEventListener("change", handleChange);
+
+    return () => {
+      mediaQuery.removeEventListener("change", handleChange);
+    };
+  }, []);
+
+  useEffect(() => {
     const root = document.documentElement;
-    const hour = new Date().getHours();
-    const autoPrefersLight = hour >= 7 && hour < 18 && !preferences.appearance.darkModeBias;
     const effectiveTheme =
       preferences.appearance.themeMode === "auto"
-        ? (preferences.appearance.timeOfDayTheme && autoPrefersLight ? "light" : "dark")
+        ? (systemPrefersLight ? "light" : "dark")
         : preferences.appearance.themeMode;
-    const accentStrong = withIntensity(resolvedAccent, Math.min(1, preferences.appearance.accentIntensity + 0.16));
+    const isLight = effectiveTheme === "light";
+    const accentStrong = resolvedArtworkTheme.accentStrong;
+    const accentSoft = resolvedArtworkTheme.accentSoft;
+    const accentGlow = resolvedArtworkTheme.accentGlow;
     const densityScale = getDensityScale(preferences.appearance.density);
     const motionDuration = getMotionDuration(preferences.appearance.motionIntensity);
     const accentRgb = hexToRgbString(resolvedAccent);
     const accentStrongRgb = hexToRgbString(accentStrong);
+    const accentSoftRgb = hexToRgbString(accentSoft);
+    const accentGlowRgb = hexToRgbString(accentGlow);
     const blurPx = 14 + preferences.appearance.blurStrength * 20;
     const transparency = preferences.appearance.transparency;
     const panelTransparency = preferences.appearance.panelTransparency;
     const material = preferences.appearance.material;
-    const shellBase = effectiveTheme === "light" ? "245, 247, 251" : "25, 28, 33";
-    const shellAlpha = material === "solid" ? 0.98 : 0.78 + transparency * 0.16;
-    const paneAlpha = material === "solid" ? 0.92 : 0.04 + panelTransparency * 0.08;
-    const paneStrongAlpha = material === "solid" ? 0.96 : 0.08 + panelTransparency * 0.1;
-    const text = effectiveTheme === "light" ? "22, 26, 31" : "247, 248, 251";
-    const textSecondary = effectiveTheme === "light" ? "70, 78, 92" : "221, 225, 233";
+    const shellBase = isLight ? "243, 243, 243" : "32, 32, 32";
+    const shellAlpha = material === "solid" ? (isLight ? 0.985 : 0.965) : isLight ? 0.86 + transparency * 0.12 : 0.86 + transparency * 0.1;
+    const paneBase = isLight ? "255, 255, 255" : "44, 44, 44";
+    const paneStrongBase = isLight ? "249, 249, 249" : "50, 50, 50";
+    const paneAlpha = material === "solid" ? (isLight ? 0.92 : 0.96) : isLight ? 0.78 + panelTransparency * 0.1 : 0.88 + panelTransparency * 0.06;
+    const paneStrongAlpha = material === "solid" ? (isLight ? 0.96 : 0.98) : isLight ? 0.88 + panelTransparency * 0.08 : 0.94 + panelTransparency * 0.05;
+    const text = isLight ? "18, 18, 18" : "255, 255, 255";
+    const textSecondary = isLight ? "79, 79, 79" : "255, 255, 255";
+    const border = isLight ? "rgba(0, 0, 0, 0.08)" : "rgba(0, 0, 0, 0.14)";
+    const borderStrong = isLight ? "rgba(0, 0, 0, 0.12)" : "rgba(255, 255, 255, 0.06)";
+    const fieldBase = isLight ? "255, 255, 255" : "55, 55, 55";
+    const fieldAlpha = isLight ? 0.96 : 0.94;
+    const fieldHoverAlpha = isLight ? 0.99 : 0.99;
+    const fieldSolid = isLight ? "rgba(255, 255, 255, 0.99)" : "rgba(45, 45, 45, 0.98)";
+    const menuSolid = isLight ? "rgba(252, 252, 252, 0.99)" : "rgba(40, 40, 40, 0.99)";
+    const buttonBase = isLight ? "rgba(247, 247, 247, 0.96)" : "rgba(48, 48, 48, 0.94)";
+    const buttonHover = isLight ? "rgba(255, 255, 255, 0.99)" : "rgba(58, 58, 58, 0.98)";
+    const playerSurface = isLight ? "rgba(245, 245, 245, 0.96)" : "rgba(28, 28, 28, 0.95)";
+    const appBackground = isLight
+      ? "radial-gradient(circle at top, rgba(255,255,255,0.7), transparent 22%), linear-gradient(180deg, #f3f3f3 0%, #ececec 100%)"
+      : "radial-gradient(circle at top, rgba(255,255,255,0.025), transparent 22%), linear-gradient(180deg, #202020 0%, #191919 100%)";
+    const overlayTop = isLight
+      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.4), transparent 20%)"
+      : "linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 20%)";
+    const overlayAccent = `radial-gradient(circle at 18% 0%, rgba(${accentRgb}, ${isLight ? 0.07 : 0.035}), transparent 22%)`;
+    const gridLine = isLight ? "rgba(18, 18, 18, 0.02)" : "rgba(255, 255, 255, 0.006)";
+    const gridLineSecondary = isLight ? "rgba(18, 18, 18, 0.016)" : "rgba(255, 255, 255, 0.005)";
 
     root.dataset.themeMode = effectiveTheme;
+    root.style.colorScheme = effectiveTheme;
     root.style.setProperty("--win-accent", resolvedAccent);
     root.style.setProperty("--win-accent-rgb", accentRgb);
     root.style.setProperty("--win-accent-strong", accentStrong);
     root.style.setProperty("--win-accent-strong-rgb", accentStrongRgb);
+    root.style.setProperty("--win-accent-soft", accentSoft);
+    root.style.setProperty("--win-accent-soft-rgb", accentSoftRgb);
+    root.style.setProperty("--win-accent-glow", accentGlow);
+    root.style.setProperty("--win-accent-glow-rgb", accentGlowRgb);
+    root.style.setProperty("--win-app-background", appBackground);
+    root.style.setProperty("--win-overlay-top", overlayTop);
+    root.style.setProperty("--win-overlay-accent", overlayAccent);
+    root.style.setProperty("--win-grid-line", gridLine);
+    root.style.setProperty("--win-grid-line-secondary", gridLineSecondary);
     root.style.setProperty("--win-shell", `rgba(${shellBase}, ${shellAlpha.toFixed(3)})`);
     root.style.setProperty("--win-shell-strong", `rgba(${shellBase}, ${(shellAlpha + 0.05).toFixed(3)})`);
-    root.style.setProperty("--win-pane", `rgba(255, 255, 255, ${paneAlpha.toFixed(3)})`);
-    root.style.setProperty("--win-pane-strong", `rgba(255, 255, 255, ${paneStrongAlpha.toFixed(3)})`);
-    root.style.setProperty("--win-pane-hover", `rgba(255, 255, 255, ${(paneStrongAlpha + 0.03).toFixed(3)})`);
+    root.style.setProperty("--win-pane", `rgba(${paneBase}, ${paneAlpha.toFixed(3)})`);
+    root.style.setProperty("--win-pane-strong", `rgba(${paneStrongBase}, ${paneStrongAlpha.toFixed(3)})`);
+    root.style.setProperty("--win-pane-hover", isLight ? "rgba(255, 255, 255, 0.98)" : `rgba(255, 255, 255, ${(paneStrongAlpha + 0.03).toFixed(3)})`);
     root.style.setProperty("--win-pane-active", `rgba(${accentRgb}, ${(0.12 + preferences.appearance.accentIntensity * 0.12).toFixed(3)})`);
+    root.style.setProperty("--win-input", `rgba(${fieldBase}, ${fieldAlpha.toFixed(3)})`);
+    root.style.setProperty("--win-input-hover", `rgba(${fieldBase}, ${fieldHoverAlpha.toFixed(3)})`);
+    root.style.setProperty("--win-input-solid", fieldSolid);
+    root.style.setProperty("--win-menu", menuSolid);
+    root.style.setProperty("--win-menu-hover", isLight ? "rgba(var(--win-accent-rgb), 0.12)" : "rgba(255, 255, 255, 0.08)");
+    root.style.setProperty("--win-menu-active", `rgba(${accentRgb}, ${isLight ? "0.16" : "0.18"})`);
+    root.style.setProperty("--win-button-surface", buttonBase);
+    root.style.setProperty("--win-button-surface-hover", buttonHover);
+    root.style.setProperty("--win-player-surface", playerSurface);
+    root.style.setProperty("--win-border", border);
+    root.style.setProperty("--win-border-strong", borderStrong);
     root.style.setProperty("--win-text", `rgba(${text}, ${effectiveTheme === "light" ? "0.96" : "0.96"})`);
     root.style.setProperty("--win-text-secondary", `rgba(${textSecondary}, ${effectiveTheme === "light" ? "0.78" : "0.70"})`);
     root.style.setProperty("--win-text-tertiary", `rgba(${textSecondary}, ${effectiveTheme === "light" ? "0.58" : "0.50"})`);
@@ -1208,7 +1488,7 @@ function App() {
     root.style.setProperty("--win-font-scale", preferences.appearance.fontScale.toString());
     root.style.setProperty("--win-motion-duration", `${motionDuration}ms`);
     root.style.setProperty("--win-lofi-opacity", preferences.appearance.lofiOverlay ? "0.18" : "0");
-  }, [preferences, resolvedAccent]);
+  }, [preferences, resolvedAccent, resolvedArtworkTheme, systemPrefersLight]);
 
   useEffect(() => {
     if (!hasLoadedSessionRef.current) {
@@ -1274,8 +1554,15 @@ function App() {
     };
   }, [navigateBack, navigateForward]);
 
-  const startPlayback = useCallback(async (track: TrackRow, queue: TrackRow[] = [track]) => {
+  const startPlayback = useCallback(async (
+    track: TrackRow,
+    {
+      queue,
+      transitionMode = "reset",
+    }: StartPlaybackOptions = {},
+  ) => {
     try {
+      const previousPath = playbackRef.current.current_path;
       const state = await invoke<PlaybackStatePayload>("play_track", {
         path: track.file_path,
         title: track.title,
@@ -1283,8 +1570,22 @@ function App() {
         album: track.album,
       });
 
-      const nextQueue = queue.length > 0 ? queue : [track];
+      const nextQueue = resolveQueueForTrack(track, queue);
       const nextIndex = nextQueue.findIndex((item) => item.file_path === track.file_path);
+
+      if (transitionMode === "reset") {
+        playbackHistoryRef.current = [];
+      } else if (
+        transitionMode === "push-current" &&
+        previousPath &&
+        previousPath !== track.file_path
+      ) {
+        const lastHistoryPath = playbackHistoryRef.current[playbackHistoryRef.current.length - 1];
+
+        if (lastHistoryPath !== previousPath) {
+          playbackHistoryRef.current = [...playbackHistoryRef.current, previousPath].slice(-96);
+        }
+      }
 
       setPlayback(state);
       setCurrentQueue(nextQueue);
@@ -1295,11 +1596,14 @@ function App() {
       console.error(error);
       setStatus(`Playback error: ${String(error)}`);
     }
-  }, []);
+  }, [resolveQueueForTrack]);
 
   const handlePlayTrack = useCallback(async (track: TrackRow, queue?: TrackRow[]) => {
-    await startPlayback(track, queue ?? currentQueue ?? [track]);
-  }, [currentQueue, startPlayback]);
+    await startPlayback(track, {
+      queue: resolveQueueForTrack(track, queue ?? currentQueue),
+      transitionMode: "reset",
+    });
+  }, [currentQueue, resolveQueueForTrack, startPlayback]);
 
   async function handleTogglePlayback() {
     try {
@@ -1316,6 +1620,7 @@ function App() {
     try {
       const state = await invoke<PlaybackStatePayload>("stop_playback");
       setPlayback(state);
+      playbackHistoryRef.current = [];
       completedTrackRef.current = "";
     } catch (error) {
       console.error(error);
@@ -1421,9 +1726,11 @@ function App() {
       : 0;
 
   async function handleNextTrack(fromEnded = false) {
-    if (!currentQueue.length) {
+    if (!currentQueue.length || !playback.current_path) {
       return;
     }
+
+    const resolvedCurrentIndex = resolveQueueIndex(currentQueue, playback.current_path, currentIndex);
 
     if (shuffleEnabled && currentQueue.length > 1) {
       const candidates = currentQueue.filter(
@@ -1431,20 +1738,29 @@ function App() {
       );
       const randomTrack = candidates[Math.floor(Math.random() * candidates.length)];
       if (randomTrack) {
-        await startPlayback(randomTrack, currentQueue);
+        await startPlayback(randomTrack, {
+          queue: currentQueue,
+          transitionMode: "push-current",
+        });
       }
       return;
     }
 
-    const nextIndex = currentIndex + 1;
+    const nextIndex = resolvedCurrentIndex + 1;
 
     if (nextIndex < currentQueue.length) {
-      await startPlayback(currentQueue[nextIndex], currentQueue);
+      await startPlayback(currentQueue[nextIndex], {
+        queue: currentQueue,
+        transitionMode: "push-current",
+      });
       return;
     }
 
     if (repeatEnabled && currentQueue.length > 0) {
-      await startPlayback(currentQueue[0], currentQueue);
+      await startPlayback(currentQueue[0], {
+        queue: currentQueue,
+        transitionMode: "push-current",
+      });
       return;
     }
 
@@ -1464,22 +1780,50 @@ function App() {
       return;
     }
 
-    if (shuffleEnabled && currentQueue.length > 1) {
-      const previousIndex = currentIndex > 0 ? currentIndex - 1 : currentQueue.length - 1;
-      await startPlayback(currentQueue[previousIndex], currentQueue);
+    if (shuffleEnabled) {
+      const previousPath = playbackHistoryRef.current[playbackHistoryRef.current.length - 1];
+
+      if (!previousPath) {
+        await handleSeek(0);
+        return;
+      }
+
+      const previousTrack = currentQueue.find((track) => track.file_path === previousPath);
+
+      if (!previousTrack) {
+        playbackHistoryRef.current = playbackHistoryRef.current.filter((path) => path !== previousPath);
+        await handleSeek(0);
+        return;
+      }
+
+      playbackHistoryRef.current = playbackHistoryRef.current.slice(0, -1);
+      await startPlayback(previousTrack, {
+        queue: currentQueue,
+        transitionMode: "preserve",
+      });
       return;
     }
 
-    const previousIndex = currentIndex - 1;
+    const resolvedCurrentIndex = resolveQueueIndex(currentQueue, playback.current_path, currentIndex);
+    const previousIndex = resolvedCurrentIndex - 1;
 
     if (previousIndex >= 0) {
-      await startPlayback(currentQueue[previousIndex], currentQueue);
+      await startPlayback(currentQueue[previousIndex], {
+        queue: currentQueue,
+        transitionMode: "preserve",
+      });
       return;
     }
 
     if (repeatEnabled && currentQueue.length > 0) {
-      await startPlayback(currentQueue[currentQueue.length - 1], currentQueue);
+      await startPlayback(currentQueue[currentQueue.length - 1], {
+        queue: currentQueue,
+        transitionMode: "preserve",
+      });
+      return;
     }
+
+    await handleSeek(0);
   }
 
   async function handleShuffleAlbum(album: AlbumSummary) {
@@ -1687,8 +2031,14 @@ function App() {
     !selectedAlbumKey &&
     !selectedArtistDetailsName &&
     (view === "albums" || view === "artists");
+  const showLibraryHeader =
+    page === "library" &&
+    !selectedAlbumKey &&
+    !selectedArtistDetailsName &&
+    !selectedGenreDetailsName;
   const currentStickySection = view === "artists" ? activeArtistSection : activeAlbumSection;
   const availableStickySections = view === "artists" ? artistSectionLabels : albumSectionLabels;
+  const isLibraryEmpty = tracks.length === 0;
   const handleViewChange = useCallback((nextView: LibraryView) => {
     if (isAlbumsLibraryView) {
       rememberLibrarySection("albums");
@@ -1696,6 +2046,7 @@ function App() {
       rememberLibrarySection("artists");
     }
 
+    suppressHistoryRef.current = true;
     setView(nextView);
     setSelectedAlbumKey(null);
     setSelectedArtistDetailsName(null);
@@ -1742,13 +2093,64 @@ function App() {
     setSelectedAlbumKey(album.key);
   }, [rememberLibrarySection]);
 
+  const resolveArtistNavigationTarget = useCallback((artistLabel: string) => {
+    const normalizedLabel = artistLabel.trim().toLowerCase();
+
+    if (!normalizedLabel) {
+      return null;
+    }
+
+    const exactMatch =
+      artists.find((artist) => artist.name.trim().toLowerCase() === normalizedLabel)?.name ?? null;
+
+    if (exactMatch) {
+      return exactMatch;
+    }
+
+    const candidateNames = artistLabel
+      .split(/\s*(?:,|&| feat\. | ft\. | featuring | x |\/)\s*/i)
+      .map((candidate) => candidate.trim())
+      .filter(Boolean);
+
+    for (const candidate of candidateNames) {
+      const match =
+        artists.find((artist) => artist.name.trim().toLowerCase() === candidate.toLowerCase())
+          ?.name ?? null;
+
+      if (match) {
+        return match;
+      }
+    }
+
+    return null;
+  }, [artists]);
+
   const handleSelectArtist = useCallback((artist: string) => {
-    rememberLibrarySection("artists");
+    const resolvedArtist = resolveArtistNavigationTarget(artist);
+
+    if (!resolvedArtist) {
+      setStatus(`Could not find an artist page for ${artist}.`);
+      return;
+    }
+
+    if (isAlbumsLibraryView) {
+      rememberLibrarySection("albums");
+    } else if (isArtistsLibraryView) {
+      rememberLibrarySection("artists");
+    }
+
     scrollContainerRef.current?.scrollTo({ top: 0, behavior: "auto" });
-    setSelectedArtistDetailsName(artist);
+    setPage("library");
+    setView("artists");
+    setSelectedArtistDetailsName(resolvedArtist);
     setSelectedAlbumKey(null);
     setSelectedGenreDetailsName(null);
-  }, [rememberLibrarySection]);
+  }, [
+    isAlbumsLibraryView,
+    isArtistsLibraryView,
+    rememberLibrarySection,
+    resolveArtistNavigationTarget,
+  ]);
 
   const handleOpenAlbumFromArtistDetails = useCallback((album: AlbumSummary) => {
     scrollContainerRef.current?.scrollTo({ top: 0, behavior: "auto" });
@@ -1867,28 +2269,26 @@ function App() {
             </div>
           )}
 
+          {showLibraryHeader ? (
+            <div
+              ref={topHeaderRef}
+              className="relative z-40 mx-5 mb-0 shrink-0 border-b border-white/8 px-5 pt-2 pb-0 md:mx-7 md:px-7 xl:mx-8 xl:px-8"
+            >
+              <TopBar
+                view={view}
+                onViewChange={handleViewChange}
+              />
+            </div>
+          ) : (
+            <div ref={topHeaderRef} className="h-0 shrink-0" />
+          )}
+
           <div
             ref={scrollContainerRef}
-            className="win-scroll-region relative min-h-0 flex-1 overflow-y-auto px-5 py-0 md:px-7 xl:px-8"
+            className="win-scroll-region relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-0 md:px-7 xl:px-8"
           >
-            {page === "library" &&
-            !selectedAlbumKey &&
-            !selectedArtistDetailsName &&
-            !selectedGenreDetailsName ? (
-              <div ref={topHeaderRef} className="win-app-shell sticky top-0 z-40 -mx-5 rounded-b-[28px] border-b border-white/10 px-5 pt-5 pb-4 shadow-[var(--win-shadow-sm)] md:-mx-7 md:px-7 xl:-mx-8 xl:px-8">
-                <TopBar
-                  view={view}
-                  onViewChange={handleViewChange}
-                  onChooseFolder={chooseFolderAndScan}
-                  isScanning={isScanning}
-                />
-              </div>
-            ) : (
-              <div ref={topHeaderRef} className="h-0" />
-            )}
-
             <section
-              className={`win-content-transition relative z-0 pt-6 pb-10 transition-opacity duration-100 ${
+              className={`win-content-transition relative z-0 ${showLibraryHeader ? "pt-2" : "pt-4"} pb-10 transition-opacity duration-100 ${
                 hiddenLibraryView &&
                 ((hiddenLibraryView === "albums" && isAlbumsLibraryView) ||
                   (hiddenLibraryView === "artists" && isArtistsLibraryView))
@@ -1897,7 +2297,7 @@ function App() {
               }`}
             >
               {showStickySectionNav ? (
-                <div className="pointer-events-none sticky top-[6.65rem] z-30 mb-3 flex w-fit pb-2">
+                <div className="pointer-events-none sticky top-0 z-30 mb-3 flex w-fit pb-2 pt-2">
                   <div className="pointer-events-auto">
                     <StickySectionNav
                       currentSection={currentStickySection}
@@ -1945,6 +2345,8 @@ function App() {
                   onDeleteProfile={deleteProfile}
                   onRenameProfile={renameProfile}
                   onSaveCurrentToProfile={saveCurrentToProfile}
+                  panelState={settingsPanelState}
+                  onTogglePanel={toggleSettingsPanel}
                 />
               ) : selectedAlbumDetails ? (
                 <div className="relative h-full min-h-0">
@@ -1954,6 +2356,7 @@ function App() {
                     topInset={shellInsets.top}
                     bottomInset={shellInsets.bottom}
                     onBack={handleBackFromAlbumDetails}
+                    onOpenArtist={handleSelectArtist}
                     onPlayTrack={handlePlayTrack}
                     onShuffleAlbum={(album) => void handleShuffleAlbum(album)}
                     onSaveMetadata={handleSaveAlbumMetadata}
@@ -1966,6 +2369,7 @@ function App() {
                   currentAlbumKey={currentAlbumKey}
                   onBack={handleBackFromArtistDetails}
                   onOpenAlbum={handleOpenAlbumFromArtistDetails}
+                  onOpenArtist={handleSelectArtist}
                   onPlayAlbum={handlePlayTrack}
                   onShuffleArtist={(albums) => void handleShuffleArtistAlbums(albums)}
                 />
@@ -1976,14 +2380,37 @@ function App() {
                   currentAlbumKey={currentAlbumKey}
                   onBack={() => setSelectedGenreDetailsName(null)}
                   onOpenAlbum={handleOpenAlbumFromArtistDetails}
+                  onOpenArtist={handleSelectArtist}
                   onPlayTrack={handlePlayTrack}
                 />
+              ) : isLibraryEmpty ? (
+                <div className="win-pane-strong mx-auto max-w-2xl rounded-[28px] px-6 py-8 text-center">
+                  <div className="text-[11px] font-medium uppercase tracking-[0.22em] text-white/40">
+                    Library Empty
+                  </div>
+                  <h2 className="mt-3 text-[2rem] font-semibold tracking-[-0.04em] text-white/94">
+                    No music found
+                  </h2>
+                  <p className="mx-auto mt-3 max-w-xl text-[13px] leading-6 text-white/56">
+                    Add a music folder in Settings to get started. Once your collection is scanned, albums, artists, songs, and genres will appear here automatically.
+                  </p>
+                  <div className="mt-6 flex items-center justify-center">
+                    <button
+                      type="button"
+                      onClick={openLibrarySettings}
+                      className="win-button inline-flex h-11 items-center rounded-full px-5 text-[13px] font-medium text-white/88 hover:text-white"
+                    >
+                      Open Settings
+                    </button>
+                  </div>
+                </div>
               ) : view === "albums" ? (
                 <AlbumGrid
                   sections={groupedAlbums}
                   currentAlbumKey={currentAlbumKey}
                   onRegisterSectionRef={registerAlbumSectionRef}
                   onOpenAlbum={handleOpenAlbumFromGrid}
+                  onOpenArtist={handleSelectArtist}
                   onPlayAlbum={handlePlayTrack}
                 />
               ) : view === "songs" ? (
@@ -2013,9 +2440,12 @@ function App() {
         <PlayerBar
           playback={playback}
           artworkPath={currentTrack?.artwork_path ?? null}
+          trackPath={currentTrack?.file_path ?? null}
           status={status}
           repeatEnabled={repeatEnabled}
           shuffleEnabled={shuffleEnabled}
+          visualizationEnabled={preferences.playback.visualizationEnabled}
+          visualizerMode={preferences.playback.visualizerMode}
           onTogglePlayback={handleTogglePlayback}
           onStopPlayback={handleStopPlayback}
           onNextTrack={() => void handleNextTrack()}

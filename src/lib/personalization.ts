@@ -10,7 +10,7 @@ export type LayoutMode =
   | "sidebar-focused"
   | "album-centric"
   | "compact-desktop";
-export type VisualizerMode = "off" | "subtle" | "immersive";
+export type VisualizerMode = "bars" | "wave" | "glow";
 export type EqualizerPreset = "Flat" | "Focus" | "Gym" | "Late Night" | "Chill";
 
 export type AppearanceSettings = {
@@ -38,6 +38,7 @@ export type PlaybackCustomizationSettings = {
   crossfadeEnabled: boolean;
   crossfadeSeconds: number;
   smoothProgress: boolean;
+  visualizationEnabled: boolean;
   visualizerMode: VisualizerMode;
 };
 
@@ -165,7 +166,8 @@ export const defaultPlaybackCustomization: PlaybackCustomizationSettings = {
   crossfadeEnabled: false,
   crossfadeSeconds: 4,
   smoothProgress: true,
-  visualizerMode: "subtle",
+  visualizationEnabled: true,
+  visualizerMode: "wave",
 };
 
 export const defaultAudioCustomization: AudioCustomizationSettings = {
@@ -187,6 +189,41 @@ export const defaultAdvancedCustomization: AdvancedCustomizationSettings = {
   shortcutSystemEnabled: true,
   debugLayoutMetrics: false,
 };
+
+function resolveVisualizerMode(
+  mode: unknown,
+  fallback: VisualizerMode,
+): VisualizerMode {
+  if (mode === "bars" || mode === "wave" || mode === "glow") {
+    return mode;
+  }
+
+  if (mode === "immersive") {
+    return "glow";
+  }
+
+  if (mode === "subtle") {
+    return "wave";
+  }
+
+  return fallback;
+}
+
+function resolveVisualizationEnabled(
+  value: unknown,
+  legacyMode: unknown,
+  fallback: boolean,
+): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (legacyMode === "off") {
+    return false;
+  }
+
+  return fallback;
+}
 
 function createDefaultProfile(id: string, name: string, description: string): ListeningProfile {
   const timestamp = new Date().toISOString();
@@ -235,6 +272,7 @@ export function createDefaultPreferences(): AppPreferences {
           ...defaultPlaybackCustomization,
           crossfadeEnabled: true,
           crossfadeSeconds: 6,
+          visualizerMode: "bars",
         },
         audio: {
           ...defaultAudioCustomization,
@@ -255,7 +293,8 @@ export function createDefaultPreferences(): AppPreferences {
         },
         playback: {
           ...defaultPlaybackCustomization,
-          visualizerMode: "off",
+          visualizationEnabled: false,
+          visualizerMode: "glow",
         },
         audio: {
           ...defaultAudioCustomization,
@@ -275,6 +314,19 @@ function mergePreferences(candidate: unknown): AppPreferences {
   }
 
   const parsed = candidate as Partial<AppPreferences>;
+  const parsedPlayback = parsed.playback;
+  const legacyParsedPlayback = parsedPlayback as
+    | (Partial<PlaybackCustomizationSettings> & { visualizerMode?: string })
+    | undefined;
+  const resolvedVisualizerMode = resolveVisualizerMode(
+    legacyParsedPlayback?.visualizerMode,
+    defaults.playback.visualizerMode,
+  );
+  const resolvedVisualizationEnabled = resolveVisualizationEnabled(
+    legacyParsedPlayback?.visualizationEnabled,
+    legacyParsedPlayback?.visualizerMode,
+    defaults.playback.visualizationEnabled,
+  );
 
   return {
     ...defaults,
@@ -286,7 +338,9 @@ function mergePreferences(candidate: unknown): AppPreferences {
     },
     playback: {
       ...defaults.playback,
-      ...parsed.playback,
+      ...parsedPlayback,
+      visualizationEnabled: resolvedVisualizationEnabled,
+      visualizerMode: resolvedVisualizerMode,
     },
     audio: {
       ...defaults.audio,
@@ -327,6 +381,20 @@ function mergePreferences(candidate: unknown): AppPreferences {
           playback: {
             ...defaults.playback,
             ...profile.playback,
+            visualizationEnabled: resolveVisualizationEnabled(
+              (profile.playback as Partial<PlaybackCustomizationSettings> | undefined)
+                ?.visualizationEnabled,
+              (profile.playback as Partial<PlaybackCustomizationSettings> & {
+                visualizerMode?: string;
+              } | undefined)?.visualizerMode,
+              defaults.playback.visualizationEnabled,
+            ),
+            visualizerMode: resolveVisualizerMode(
+              (profile.playback as Partial<PlaybackCustomizationSettings> & {
+                visualizerMode?: string;
+              } | undefined)?.visualizerMode,
+              defaults.playback.visualizerMode,
+            ),
           },
           audio: {
             ...defaults.audio,

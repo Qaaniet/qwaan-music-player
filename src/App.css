@@ -1,42 +1,67 @@
 @import "tailwindcss";
 
 :root {
-  --win-accent-rgb: 127, 179, 255;
-  --win-accent-strong-rgb: 171, 208, 255;
-  --win-accent: #7fb3ff;
-  --win-accent-strong: #abd0ff;
-  --win-accent-soft: rgba(127, 179, 255, 0.14);
-  --win-shell: rgba(20, 24, 30, 0.72);
-  --win-shell-strong: rgba(17, 20, 26, 0.84);
-  --win-pane: rgba(255, 255, 255, 0.055);
-  --win-pane-strong: rgba(255, 255, 255, 0.082);
-  --win-pane-hover: rgba(255, 255, 255, 0.1);
-  --win-pane-active: rgba(var(--win-accent-rgb), 0.16);
-  --win-border: rgba(255, 255, 255, 0.085);
-  --win-border-strong: rgba(255, 255, 255, 0.14);
-  --win-text: rgba(244, 247, 252, 0.96);
-  --win-text-secondary: rgba(223, 230, 240, 0.66);
-  --win-text-tertiary: rgba(223, 230, 240, 0.46);
-  --win-blur-strength: 24px;
+  --win-accent-rgb: 96, 205, 255;
+  --win-accent-strong-rgb: 141, 224, 255;
+  --win-accent: #60cdff;
+  --win-accent-strong: #8de0ff;
+  --win-accent-soft: #3e8bb6;
+  --win-accent-soft-rgb: 62, 139, 182;
+  --win-accent-glow: #214a63;
+  --win-accent-glow-rgb: 33, 74, 99;
+  --win-shell: rgba(32, 32, 32, 0.94);
+  --win-shell-strong: rgba(39, 39, 39, 0.97);
+  --win-pane: rgba(44, 44, 44, 0.92);
+  --win-pane-strong: rgba(50, 50, 50, 0.96);
+  --win-pane-hover: rgba(255, 255, 255, 0.04);
+  --win-pane-active: rgba(var(--win-accent-rgb), 0.14);
+  --win-input: rgba(55, 55, 55, 0.92);
+  --win-input-hover: rgba(62, 62, 62, 0.98);
+  --win-input-solid: rgba(45, 45, 45, 0.98);
+  --win-menu: rgba(40, 40, 40, 0.99);
+  --win-menu-hover: rgba(255, 255, 255, 0.05);
+  --win-menu-active: rgba(var(--win-accent-rgb), 0.16);
+  --win-button-surface: rgba(48, 48, 48, 0.94);
+  --win-button-surface-hover: rgba(58, 58, 58, 0.98);
+  --win-player-surface: rgba(28, 28, 28, 0.95);
+  --win-border: rgba(0, 0, 0, 0.14);
+  --win-border-strong: rgba(255, 255, 255, 0.06);
+  --win-text: rgba(255, 255, 255, 0.96);
+  --win-text-secondary: rgba(255, 255, 255, 0.68);
+  --win-text-tertiary: rgba(255, 255, 255, 0.42);
+  --win-app-background: radial-gradient(circle at top, rgba(255, 255, 255, 0.025), transparent 22%), linear-gradient(180deg, #202020 0%, #191919 100%);
+  --win-overlay-top: linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 20%);
+  --win-overlay-accent: radial-gradient(circle at 18% 0%, rgba(var(--win-accent-rgb), 0.035), transparent 22%);
+  --win-grid-line: rgba(255, 255, 255, 0.006);
+  --win-grid-line-secondary: rgba(255, 255, 255, 0.005);
+  --win-blur-strength: 26px;
   --win-density-scale: 1;
   --win-font-scale: 1;
-  --win-motion-duration: 220ms;
+  --win-motion-duration: 150ms;
   --win-lofi-opacity: 0;
-  --win-radius-xs: 10px;
-  --win-radius-sm: 14px;
-  --win-radius-md: 18px;
-  --win-radius-lg: 24px;
-  --win-radius-xl: 30px;
-  --win-shadow-xs: 0 10px 24px rgba(5, 8, 13, 0.16);
-  --win-shadow-sm: 0 18px 40px rgba(5, 8, 13, 0.2);
-  --win-shadow-md: 0 26px 60px rgba(3, 6, 11, 0.24);
-  --win-shadow-lg: 0 40px 90px rgba(0, 0, 0, 0.34);
+  --win-radius-xs: 4px;
+  --win-radius-sm: 4px;
+  --win-radius-md: 6px;
+  --win-radius-lg: 8px;
+  --win-radius-xl: 10px;
+  --win-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --win-shadow-sm: 0 3px 8px rgba(0, 0, 0, 0.22);
+  --win-shadow-md: 0 8px 18px rgba(0, 0, 0, 0.2);
+  --win-shadow-lg: 0 16px 28px rgba(0, 0, 0, 0.24);
   --win-ease: cubic-bezier(0.32, 0.72, 0, 1);
   --win-ease-bounce: cubic-bezier(0.22, 1.18, 0.3, 1);
   color: var(--win-text);
-  background: #0b0f14;
+  background: #202020;
   font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
-  font-size: calc(16px * var(--win-density-scale) * var(--win-font-scale));
+  font-size: calc(14px * var(--win-density-scale) * var(--win-font-scale));
+}
+
+:root[data-theme-mode="dark"] {
+  color-scheme: dark;
+}
+
+:root[data-theme-mode="light"] {
+  color-scheme: light;
 }
 
 * {
@@ -47,18 +72,19 @@ html,
 body,
 #root {
   height: 100%;
+  overflow: hidden;
 }
 
 body {
   margin: 0;
   overflow: hidden;
-  background:
-    radial-gradient(circle at top left, rgba(var(--win-accent-rgb), 0.16), transparent 26%),
-    radial-gradient(circle at 78% 6%, rgba(255, 255, 255, 0.08), transparent 20%),
-    radial-gradient(circle at 50% 100%, rgba(91, 124, 160, 0.08), transparent 32%),
-    linear-gradient(180deg, #11161d 0%, #0b0f14 100%);
+  overscroll-behavior: none;
+  background: var(--win-app-background);
   color: var(--win-text);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
+  transition:
+    background calc(var(--win-motion-duration) + 120ms) var(--win-ease),
+    color var(--win-motion-duration) var(--win-ease);
 }
 
 body::before,
@@ -71,19 +97,20 @@ body::after {
 
 body::before {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 26%),
-    radial-gradient(circle at 22% 0%, rgba(var(--win-accent-rgb), 0.11), transparent 24%),
+    var(--win-overlay-top),
+    var(--win-overlay-accent),
     linear-gradient(0deg, rgba(255, 214, 165, var(--win-lofi-opacity)), rgba(255, 214, 165, 0));
-  mix-blend-mode: screen;
-  opacity: 0.65;
+  mix-blend-mode: normal;
+  opacity: 0.6;
+  transition: background calc(var(--win-motion-duration) + 120ms) var(--win-ease);
 }
 
 body::after {
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
-  background-size: 100% 100%, 32px 32px;
-  opacity: 0.12;
+    linear-gradient(var(--win-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--win-grid-line-secondary) 1px, transparent 1px);
+  background-size: 100% 100%, 36px 36px;
+  opacity: 0.08;
 }
 
 button,
@@ -91,6 +118,7 @@ input,
 select,
 textarea {
   font: inherit;
+  color: inherit;
   transition:
     background-color var(--win-motion-duration) var(--win-ease),
     border-color var(--win-motion-duration) var(--win-ease),
@@ -124,11 +152,11 @@ a,
 
 .win-app-shell {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.02) 22%, transparent 60%),
-    linear-gradient(180deg, rgba(8, 11, 16, 0.18), rgba(8, 11, 16, 0.38)),
-    var(--win-shell);
-  backdrop-filter: blur(var(--win-blur-strength)) saturate(145%) brightness(1.02);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.065);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.006) 20%, transparent 52%),
+    linear-gradient(180deg, rgba(18, 18, 18, 0.03), rgba(18, 18, 18, 0.08)),
+    var(--win-player-surface);
+  backdrop-filter: blur(var(--win-blur-strength)) saturate(112%) brightness(1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
 }
 
 .win-pane,
@@ -146,123 +174,159 @@ a,
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), transparent 24%);
-  opacity: 0.7;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.024), transparent 18%);
+  opacity: 0.4;
 }
 
 .win-pane {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.008)),
     var(--win-pane);
   border: 1px solid var(--win-border);
-  box-shadow: var(--win-shadow-xs), inset 0 1px 0 rgba(255, 255, 255, 0.035);
-  backdrop-filter: blur(calc(var(--win-blur-strength) * 0.86)) saturate(138%);
+  box-shadow: var(--win-shadow-xs), inset 0 1px 0 rgba(255, 255, 255, 0.018);
+  backdrop-filter: blur(calc(var(--win-blur-strength) * 0.75)) saturate(112%);
 }
 
 .win-pane-strong {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.008)),
     var(--win-pane-strong);
   border: 1px solid var(--win-border-strong);
   box-shadow:
     var(--win-shadow-sm),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    inset 0 -10px 30px rgba(255, 255, 255, 0.02);
-  backdrop-filter: blur(calc(var(--win-blur-strength) * 1.05)) saturate(146%);
+    inset 0 1px 0 rgba(255, 255, 255, 0.022);
+  backdrop-filter: blur(calc(var(--win-blur-strength) * 0.9)) saturate(114%);
 }
 
 .win-glass {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)),
-    rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.075);
-  box-shadow: var(--win-shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(calc(var(--win-blur-strength) * 0.94)) saturate(144%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.008)),
+    var(--win-shell);
+  border: 1px solid var(--win-border);
+  box-shadow: var(--win-shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.018);
+  backdrop-filter: blur(calc(var(--win-blur-strength) * 0.85)) saturate(110%);
 }
 
 .win-button {
   position: relative;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--win-radius-sm);
+  border: 1px solid var(--win-border);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02)),
-    rgba(255, 255, 255, 0.035);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.008)),
+    var(--win-button-surface);
   color: var(--win-text);
   box-shadow:
-    0 8px 22px rgba(5, 8, 13, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(calc(var(--win-blur-strength) * 0.8)) saturate(135%);
+    0 1px 1px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(calc(var(--win-blur-strength) * 0.74)) saturate(112%);
 }
 
 .win-button:hover {
-  border-color: rgba(255, 255, 255, 0.14);
+  border-color: var(--win-border-strong);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
-    rgba(255, 255, 255, 0.055);
-  box-shadow:
-    0 14px 28px rgba(5, 8, 13, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  transform: translateY(-1px);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012)),
+    var(--win-button-surface-hover);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.026);
+  transform: none;
 }
 
 .win-button:active {
-  transform: scale(0.985);
+  transform: none;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04)),
-    rgba(255, 255, 255, 0.07);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.018)),
+    var(--win-input-hover);
 }
 
 .win-button-primary {
   position: relative;
-  border-radius: 999px;
-  border: 1px solid rgba(var(--win-accent-strong-rgb), 0.26);
+  border-radius: var(--win-radius-sm);
+  border: 1px solid rgba(var(--win-accent-rgb), 0.22);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.1)),
-    linear-gradient(180deg, rgba(var(--win-accent-strong-rgb), 0.96), rgba(var(--win-accent-rgb), 0.88));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)),
+    linear-gradient(180deg, rgba(var(--win-accent-rgb), 0.72), rgba(var(--win-accent-soft-rgb), 0.82));
   color: #08111d;
-  box-shadow:
-    0 16px 36px rgba(var(--win-accent-rgb), 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .win-button-primary:hover {
-  box-shadow:
-    0 20px 40px rgba(var(--win-accent-rgb), 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.34);
-  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  filter: brightness(1.03);
+  transform: none;
 }
 
 .win-button-primary:active {
-  transform: scale(0.985);
+  filter: brightness(0.98);
+  transform: none;
 }
 
 .win-field {
   border-radius: var(--win-radius-sm);
-  border: 1px solid rgba(255, 255, 255, 0.065);
+  border: 1px solid var(--win-border);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
-    rgba(255, 255, 255, 0.03);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01)),
+    var(--win-input);
   color: var(--win-text);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 8px 24px rgba(5, 8, 13, 0.12);
-  backdrop-filter: blur(calc(var(--win-blur-strength) * 0.75)) saturate(132%);
+    inset 0 1px 0 rgba(255, 255, 255, 0.018),
+    0 1px 2px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(calc(var(--win-blur-strength) * 0.58)) saturate(108%);
 }
 
 .win-field::placeholder {
-  color: rgba(223, 227, 234, 0.42);
+  color: var(--win-text-tertiary);
 }
 
 .win-field:hover {
-  border-color: rgba(255, 255, 255, 0.095);
+  border-color: var(--win-border-strong);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.036)),
-    rgba(255, 255, 255, 0.04);
+    var(--win-input-hover);
+}
+
+.win-field:focus,
+.win-field:focus-visible {
+  border-color: rgba(var(--win-accent-rgb), 0.26);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.018),
+    0 0 0 1px rgba(var(--win-accent-rgb), 0.2),
+    0 2px 8px rgba(0, 0, 0, 0.16);
+}
+
+.win-field,
+.win-field option,
+.win-field optgroup,
+select,
+option,
+optgroup {
+  color: var(--win-text);
+}
+
+select.win-field,
+select.win-select {
+  appearance: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.018)),
+    var(--win-input-solid);
+  background-repeat: no-repeat;
+  background-position: right 0.9rem center;
+  background-size: 0.65rem;
+}
+
+select.win-field option,
+select.win-select option,
+option {
+  background: var(--win-menu);
+  color: var(--win-text);
+}
+
+select.win-field:disabled,
+select.win-select:disabled {
+  opacity: 0.65;
 }
 
 .win-tab {
   position: relative;
-  border-radius: 999px;
+  border-radius: var(--win-radius-sm);
   color: var(--win-text-secondary);
   transition:
     color var(--win-motion-duration) var(--win-ease),
@@ -281,8 +345,42 @@ a,
   color: var(--win-text-tertiary);
 }
 
+.win-heading {
+  color: var(--win-text);
+}
+
+.win-body {
+  color: var(--win-text-secondary);
+}
+
+.win-surface-muted {
+  background: color-mix(in srgb, var(--win-pane-strong) 78%, transparent);
+  border: 1px solid var(--win-border);
+}
+
+:root[data-theme-mode="light"] [class*="text-white/9"],
+:root[data-theme-mode="light"] [class*="text-white/8"] {
+  color: var(--win-text) !important;
+}
+
+:root[data-theme-mode="light"] [class*="text-white/7"],
+:root[data-theme-mode="light"] [class*="text-white/6"],
+:root[data-theme-mode="light"] [class*="text-white/5"] {
+  color: var(--win-text-secondary) !important;
+}
+
+:root[data-theme-mode="light"] [class*="text-white/4"],
+:root[data-theme-mode="light"] [class*="text-white/3"] {
+  color: var(--win-text-tertiary) !important;
+}
+
+:root[data-theme-mode="light"] [class*="border-white/"] {
+  border-color: var(--win-border) !important;
+}
+
 .win-scroll-region {
   scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 .win-content-transition {
@@ -306,8 +404,8 @@ a,
 }
 
 .win-card-hover:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--win-shadow-md);
+  transform: none;
+  box-shadow: var(--win-shadow-sm);
 }
 
 @keyframes win-fade-in {
@@ -357,8 +455,8 @@ a,
 }
 
 ::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -366,17 +464,17 @@ a,
 }
 
 ::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
+  border: 1px solid transparent;
   border-radius: 999px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.1)),
-    rgba(255, 255, 255, 0.12);
+    linear-gradient(180deg, color-mix(in srgb, var(--win-text) 12%, transparent), color-mix(in srgb, var(--win-text) 6%, transparent)),
+    color-mix(in srgb, var(--win-text) 6%, transparent);
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.14)),
-    rgba(255, 255, 255, 0.16);
+    linear-gradient(180deg, color-mix(in srgb, var(--win-text) 22%, transparent), color-mix(in srgb, var(--win-text) 10%, transparent)),
+    color-mix(in srgb, var(--win-text) 12%, transparent);
   background-clip: padding-box;
 }

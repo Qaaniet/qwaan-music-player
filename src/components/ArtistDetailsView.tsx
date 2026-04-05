@@ -10,6 +10,7 @@ type ArtistDetailsViewProps = {
   currentAlbumKey: string;
   onBack: () => void;
   onOpenAlbum: (album: AlbumSummary) => void;
+  onOpenArtist: (artist: string) => void;
   onPlayAlbum: (track: TrackRow, queue: TrackRow[]) => void;
   onShuffleArtist: (albums: AlbumSummary[]) => void;
 };
@@ -62,6 +63,7 @@ export function ArtistDetailsView({
   currentAlbumKey,
   onBack,
   onOpenAlbum,
+  onOpenArtist,
   onPlayAlbum,
   onShuffleArtist,
 }: ArtistDetailsViewProps) {
@@ -146,6 +148,7 @@ export function ArtistDetailsView({
           sections={[["", albums]]}
           currentAlbumKey={currentAlbumKey}
           onOpenAlbum={onOpenAlbum}
+          onOpenArtist={onOpenArtist}
           onPlayAlbum={onPlayAlbum}
         />
       </section>

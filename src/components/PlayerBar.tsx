@@ -8,7 +8,9 @@ import {
   useRef,
   useState,
 } from "react";
+import type { VisualizerMode } from "../lib/personalization";
 import type { PlaybackStatePayload } from "../types";
+import { PlayerVisualization } from "./PlayerVisualization";
 import {
   NextIcon,
   PauseIcon,
@@ -23,9 +25,12 @@ import {
 type PlayerBarProps = {
   playback: PlaybackStatePayload;
   artworkPath: string | null;
+  trackPath: string | null;
   status: string;
   repeatEnabled: boolean;
   shuffleEnabled: boolean;
+  visualizationEnabled: boolean;
+  visualizerMode: VisualizerMode;
   onTogglePlayback: () => void;
   onStopPlayback: () => void;
   onNextTrack: () => void;
@@ -81,10 +86,10 @@ function GhostControl({
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
-      className={`inline-flex h-9 w-9 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-[4px] transition disabled:cursor-not-allowed disabled:opacity-50 ${
         active
-          ? "border border-white/12 bg-[linear-gradient(180deg,rgba(var(--win-accent-rgb),0.18),rgba(var(--win-accent-rgb),0.1))] text-white shadow-[0_14px_26px_rgba(5,8,13,0.16)]"
-          : "text-white/68 hover:bg-white/[0.08] hover:text-white"
+          ? "border border-[var(--win-border-strong)] bg-[linear-gradient(180deg,rgba(var(--win-accent-rgb),0.18),rgba(var(--win-accent-rgb),0.1))] text-[var(--win-text)] shadow-[0_14px_26px_rgba(5,8,13,0.16)]"
+          : "text-[var(--win-text-secondary)] hover:bg-[var(--win-pane-hover)] hover:text-[var(--win-text)]"
       } ${hidden ? "pointer-events-none opacity-0" : "opacity-100"}`}
     >
       {children}
@@ -123,9 +128,12 @@ function ArtworkThumb({
 export function PlayerBar({
   playback,
   artworkPath,
+  trackPath,
   status,
   repeatEnabled,
   shuffleEnabled,
+  visualizationEnabled,
+  visualizerMode,
   onTogglePlayback,
   onStopPlayback,
   onNextTrack,
@@ -180,8 +188,8 @@ export function PlayerBar({
   }
 
   return (
-    <footer className="win-app-shell mx-3 mb-3 rounded-[28px] border border-white/10 shadow-[var(--win-shadow-md)]">
-      <div className="flex items-center gap-3 px-4 pt-3 text-[11px] text-white/42">
+      <footer className="win-app-shell mx-3 mb-3 rounded-[8px] border border-[var(--win-border)] shadow-[var(--win-shadow-sm)]">
+      <div className="flex items-center gap-3 px-4 pt-3 text-[12px] text-[var(--win-text-tertiary)]">
         <span className="w-10 text-right">{formatTime(position)}</span>
         <input
           type="range"
@@ -205,16 +213,26 @@ export function PlayerBar({
         <span className="w-10">{formatTime(duration)}</span>
       </div>
 
-      <div ref={rootRef} className="relative h-[96px] overflow-hidden px-4 py-4">
+      <div ref={rootRef} className="relative h-[92px] overflow-hidden px-4 py-4">
+        <PlayerVisualization
+          trackPath={trackPath}
+          isPlaying={playback.is_playing}
+          playbackPosition={position}
+          playbackDuration={duration}
+          enabled={visualizationEnabled && Boolean(trackPath)}
+          mode={visualizerMode}
+          compact={barWidth < 1160}
+        />
+
         <div className="absolute inset-y-0 left-4 flex max-w-[44%] min-w-0 items-center gap-3 pr-4">
-          <div className="win-pane-strong h-14 w-14 shrink-0 overflow-hidden rounded-[18px] bg-white/[0.04] shadow-[var(--win-shadow-sm)]">
+          <div className="win-pane-strong h-14 w-14 shrink-0 overflow-hidden rounded-[4px] bg-[var(--win-input)] shadow-[var(--win-shadow-sm)]">
             <ArtworkThumb artworkPath={artworkPath} seed={playback.album || playback.title || "Now Playing"} />
           </div>
           <div className="min-w-0">
-            <div className="truncate text-[14px] font-semibold tracking-[-0.02em] text-white/94">
+            <div className="truncate text-[14px] font-semibold tracking-[-0.01em] text-[var(--win-text)]">
               {playback.title || "Nothing playing"}
             </div>
-            <div className="truncate text-[12px] text-white/56">
+            <div className="truncate text-[12px] leading-5 text-[var(--win-text-secondary)]">
               {[playback.artist, playback.album].filter(Boolean).join(" • ") || status}
             </div>
           </div>
@@ -243,7 +261,7 @@ export function PlayerBar({
               onClick={onTogglePlayback}
               disabled={!playback.current_path}
               aria-label={playback.is_playing ? "Pause" : "Play"}
-              className="win-button-primary inline-flex h-14 w-14 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50"
+              className="win-button-primary inline-flex h-12 w-12 items-center justify-center rounded-[4px] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {playback.is_playing ? (
               <PauseIcon className="h-6 w-6" />
@@ -279,14 +297,14 @@ export function PlayerBar({
 
         <div className="absolute inset-y-0 right-4 flex items-center">
           <div
-            className={`flex-col items-end gap-1.5 text-zinc-400 transition ${
+            className={`flex-col items-end gap-1.5 text-[var(--win-text-secondary)] transition ${
               hideVolume ? "pointer-events-none opacity-0" : "flex opacity-100"
             }`}
             onWheel={handleVolumeWheel}
           >
-            <div className="text-[11px] font-medium tracking-[0.18em] text-white/40">{volumeValue}</div>
+            <div className="text-[11px] font-medium tracking-[0.18em] text-[var(--win-text-tertiary)]">{volumeValue}</div>
             <div className="flex items-center gap-3">
-              <SpeakerIcon className="h-4 w-4 text-white/56" />
+              <SpeakerIcon className="h-4 w-4 text-[var(--win-text-secondary)]" />
               <input
                 type="range"
                 min={0.01}
@@ -296,12 +314,12 @@ export function PlayerBar({
                 onChange={(event: ChangeEvent<HTMLInputElement>) =>
                   onVolumeChange(clampVolume(Number(event.target.value)))
                 }
-                className="h-1 w-32 cursor-pointer appearance-none rounded-full bg-white/12 accent-[var(--win-accent-strong)]"
+                className="h-1 w-32 cursor-pointer appearance-none rounded-full bg-[color-mix(in_srgb,var(--win-text)_12%,transparent)] accent-[var(--win-accent-strong)]"
               />
             </div>
           </div>
           {hideVolume ? (
-            <div className="text-[12px] text-white/42">{volumeValue}</div>
+            <div className="text-[13px] text-[var(--win-text-tertiary)]">{volumeValue}</div>
           ) : null}
         </div>
       </div>

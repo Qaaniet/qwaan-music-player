@@ -64,15 +64,15 @@ const ArtistCard = memo(function ArtistCard({
       data-library-item="artist"
       data-library-item-key={artist.name}
       data-library-section={artist.name.trim().charAt(0).toUpperCase().match(/^[A-Z]$/) ? artist.name.trim().charAt(0).toUpperCase() : "&"}
-      className="group w-[168px] space-y-2.5 text-left"
+      className="group flex w-[164px] flex-col gap-2.5 text-left"
       style={{ contentVisibility: "auto", containIntrinsicSize: "250px" }}
     >
-      <div className="relative h-[168px] w-[168px] overflow-hidden rounded-[18px] border border-white/8 bg-white/[0.03] transition duration-200 hover:border-white/14 hover:shadow-[0_14px_28px_rgba(0,0,0,0.18)]">
+      <div className="relative h-[164px] w-[164px] overflow-hidden rounded-[4px] border border-[var(--win-border)] bg-[var(--win-pane)] transition duration-200 hover:border-[var(--win-border-strong)] hover:shadow-[var(--win-shadow-sm)]">
         <ArtistImage artist={artist} />
-        <div className="absolute inset-0 bg-[linear-gradient(to_top,rgba(6,8,12,0.58),rgba(6,8,12,0.08))]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_top,rgba(0,0,0,0.32),rgba(0,0,0,0.03))]" />
       </div>
-      <div className="h-[44px] text-[14px] font-semibold text-white/94">
-        <div className="line-clamp-2 leading-snug">{artist.name}</div>
+      <div className="flex min-h-[50px] items-start px-0.5 pb-1 text-[13px] font-semibold text-[var(--win-text)]">
+        <div className="line-clamp-2 leading-[1.28] tracking-[-0.015em]">{artist.name}</div>
       </div>
     </button>
   );
@@ -84,17 +84,17 @@ export const ArtistGrid = memo(function ArtistGrid({
   onRegisterSectionRef,
 }: ArtistGridProps) {
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       {sections.map(([section, artists]) => (
         <section
           key={section}
           ref={(element) => onRegisterSectionRef?.(section, element)}
           data-library-section={section}
-          className="space-y-3"
+          className="space-y-2.5"
           style={{ contentVisibility: "auto", containIntrinsicSize: "720px" }}
         >
-          <div className="text-[28px] font-semibold tracking-[-0.03em] text-white/76">{section}</div>
-          <div className="grid grid-cols-[repeat(auto-fill,168px)] justify-start gap-x-5 gap-y-8">
+          <div className="text-[20px] font-semibold tracking-[-0.02em] text-[var(--win-text-secondary)]">{section}</div>
+          <div className="grid grid-cols-[repeat(auto-fill,164px)] justify-start gap-x-5 gap-y-7">
             {artists.map((artist) => (
               <ArtistCard
                 key={artist.name}

@@ -16,6 +16,7 @@ type AlbumDetailsViewProps = {
   topInset: number;
   bottomInset: number;
   onBack: () => void;
+  onOpenArtist: (artist: string) => void;
   onPlayTrack: (track: TrackRow, queue: TrackRow[]) => void;
   onShuffleAlbum: (album: AlbumSummary) => void;
   onSaveMetadata: (payload: SaveAlbumMetadataPayload) => Promise<SaveAlbumMetadataResult>;
@@ -71,6 +72,7 @@ export function AlbumDetailsView({
   topInset,
   bottomInset,
   onBack,
+  onOpenArtist,
   onPlayTrack,
   onShuffleAlbum,
   onSaveMetadata,
@@ -103,7 +105,13 @@ export function AlbumDetailsView({
             <div className="space-y-2">
               <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">Album</div>
               <h2 className="text-[2.7rem] font-semibold tracking-[-0.04em] text-white/96">{album.name}</h2>
-              <div className="text-[18px] text-white/72">{album.artist}</div>
+              <button
+                type="button"
+                onClick={() => onOpenArtist(album.artist)}
+                className="text-[18px] text-white/72 transition hover:text-[var(--win-accent-strong)] hover:underline hover:decoration-[rgba(var(--win-accent-rgb),0.42)] hover:underline-offset-4"
+              >
+                {album.artist}
+              </button>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-white/50">
                 <span>{album.year ?? "Unknown year"}</span>
                 <span className="text-white/24">•</span>
